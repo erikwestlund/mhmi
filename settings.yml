@@ -1,0 +1,66 @@
+default:
+  project_name: Maternal Health Missing Data 1
+  project_type: presentation
+  author:
+    name: Erik Westlund
+    email: ewestlund@jhu.edu
+    affiliation: Johns Hopkins Bloomberg School of Public Health
+  directories:
+    presentation_source: presentation.qmd
+    rendered_slides: '.'
+    data: data
+    functions: functions
+  extra_directories: ~
+  packages:
+    use_renv: no
+    default_packages:
+    - name: ggdag
+      source: cran
+      auto_attach: yes
+    - name: dagitty
+      source: cran
+      auto_attach: yes
+    - name: dplyr
+      source: cran
+      auto_attach: yes
+    - name: ggplot2
+      source: cran
+      auto_attach: yes
+    - name: purrr
+      source: cran
+      auto_attach: yes
+    - name: tidyr
+      source: cran
+      auto_attach: yes
+    - name: kableExtra
+      source: cran
+      auto_attach: yes
+    - name: mice
+      source: cran
+      auto_attach: yes
+    - name: miceadds
+      source: cran
+      auto_attach: yes
+  connections:
+    default_database: ~
+    default_storage_bucket: ~
+    databases: {}
+    storage_buckets: {}
+  git:
+    enabled: yes
+    user_name: ''
+    user_email: ''
+    hooks:
+      ai_sync: no
+      data_security: no
+      check_sensitive_dirs: no
+  ai:
+    enabled: yes
+    assistants: claude
+  scaffold:
+    seed_on_scaffold: no
+    seed: no
+    set_theme_on_scaffold: yes
+    ggplot_theme: theme_minimal
+    notebook_format: quarto
+    positron: yes

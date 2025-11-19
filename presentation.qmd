@@ -1,0 +1,1378 @@
+---
+title: "Missing Data and Imputation 1"
+subtitle: "Concepts, Challenges, and Strategies to Address Missing Data"
+author: "Erik Westlund"
+date: "`r Sys.Date()`"
+format:
+  revealjs:
+    theme: simple
+    transition: slide
+    slide-number: true
+    incremental: true
+    self-contained: true
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r}
+#| label: setup
+#| include: false
+framework::scaffold()
+
+theme_set(theme_minimal(base_size = 16))
+
+set.seed(123)
+```
+
+## Why Missing Data Matters
+
+- Maternal health studies often rely on observational cohorts, so incomplete data is common.
+- Ignoring missingness can erase power, bias estimates, or make truth unknowable.
+- Today: simulation-first walkthrough with simple DAGs and linear models.
+
+## Simulated Data: Seeing Is Believing
+
+- Using simulated data allows us to see first hand how the concepts behind missing data strategies operate in practice.
+- They help build intuition for how missing data strategies succeed or fail.
+
+## Causal Thinking
+
+- Working with observational data does not mean we can skip causality; it makes it more important.
+- A defensible causal graph is needed to reason about missingness mechanisms.
+- Without it, multiple imputation can reinforce bias instead of fixing it.
+
+## Stylized Teaching Examples
+
+- The DAGs and simulations today are deliberately simple.
+- Real maternal-health data has more variables, feedback loops, and measurement issues.
+
+## Stylized Teaching Examples (cont.)
+
+- Treat these as "toy" examples to see how missingness mechanisms and fixes behave.
+- Next session: revisit with a more realistic, higher-dimensional DAG.
+
+## No Exit & Three Other Plays: Mechanisms
+
+::: columns
+::: column
+- **Everything is Perfect**: Complete case analysis
+- **Ignorable and Annoying**: Missing Completely at Random (MCAR)
+- **Dangerous but Manageable**: Missing at Random (MAR)
+- **No Exit**: Missing Not at Random (MNAR)
+:::
+::: column
+![](images/noexit.jpg){width=60% fig-align="right"}
+:::
+:::
+
+## Today's Plan
+
+- Work through examples of MCAR and MAR to get an intution for their implications
+- Examine common "fixes" to show how they fail and motivate why we need multiple imputation 
+
+
+```{r}
+#| label: dag-objects
+#| include: false
+
+# Base DAG: education → nutrition → birthweight
+dag_xy <- dagify(
+  X ~ E,
+  Y ~ X + E,
+  coords = list(
+    x = c(E = 0, X = 1.5, Y = 3),
+    y = c(E = 1, X = 0,   Y = 0)
+  ),
+  labels = c(
+    "E" = "observed factor\n(e.g., education)",
+    "X" = "nutrition",
+    "Y" = "birthweight"
+  )
+)
+
+# MCAR: random failure; missingness not related to E or X
+dag_mcar <- dagify(
+  X ~ E,
+  Y ~ X + E,
+  X_miss ~ W,
+  coords = list(
+    x = c(E = 0, X = 1.5, Y = 3, W = 1.5, X_miss = 1.5),
+    y = c(E = 1, X = 0,   Y = 0, W = 1.6, X_miss = 2.3)
+  ),
+  labels = c(
+    "E"      = "observed factor\n(e.g., education)",
+    "X"      = "nutrition",
+    "Y"      = "birthweight",
+    "W"      = "random\nfailure",
+    "X_miss" = "nutrition\nmissing"
+  )
+)
+
+# MAR: an observed factor and high nutrition drive missingness
+dag_mar <- dagify(
+  X ~ E,
+  Y ~ X + E,
+  X_miss ~ E + X,
+  coords = list(
+    x = c(E = 0, X = 1.5, Y = 3, X_miss = 1.5),
+    y = c(E = 1, X = 0,   Y = 0, X_miss = 2.0)
+  ),
+  labels = c(
+    "E"      = "observed factor\n(e.g., education)",
+    "X"      = "nutrition",
+    "Y"      = "birthweight",
+    "X_miss" = "nutrition\nmissing"
+  )
+)
+
+dag_mnar_big <- dagify(
+  nutrition ~ education + income + family + class,
+  birthweight ~ nutrition + provider + class,
+  income ~ class,
+  insurance ~ education + income,
+  provider ~ class,
+  family ~ class,
+  missing ~ income + provider + family + class,
+  coords = list(
+    x = c(class = 0, education = 1.5, income = 1.5, insurance = 3, family = 0.4,
+          provider = 3.2, nutrition = 4.4, birthweight = 6, missing = 3.8),
+    y = c(class = 1.6, education = 2.5, income = 0.6, insurance = 1.8,
+          family = -0.2, provider = -0.4, nutrition = 1.0, birthweight = 1.0,
+          missing = -1.0)
+  ),
+  labels = c(
+    class = "Class position\n(hidden)",
+    education = "Education\n(observed)",
+    income = "Income\n(mostly hidden)",
+    insurance = "Insurance\n(observed)",
+    family = "Family stability\n(hidden)",
+    provider = "Provider quality\n(hidden)",
+    nutrition = "Nutrition",
+    birthweight = "Birthweight",
+    missing = "Nutrition\nmissing"
+  )
+)
+
+p_xy   <- ggdag(dag_xy,   text = TRUE, use_labels = "label") + theme_dag()
+p_mcar <- ggdag(dag_mcar, text = TRUE, use_labels = "label") + theme_dag()
+p_mar  <- ggdag(dag_mar,  text = TRUE, use_labels = "label") + theme_dag()
+p_mnar_big <- ggdag(dag_mnar_big, text = TRUE, use_labels = "label") + theme_dag()
+```
+
+## Ground Truth
+
+
+- Nutrition effect on birthweight ($β_X$): 0.5.
+- Observed factor effect on birthweight ($β_E$): 1.
+- Standard deviation around effect size (error): 2.
+- Keep these in mind as we go; they are the "truth" for all our examples.
+
+```{r}
+#| label: sim-truth-params
+#| echo: true
+
+beta_x_true    <- 0.5   # effect of nutrition on birthweight
+beta_e_true    <- 1     # effect of the observed factor (e.g., education) on birthweight
+sd_error_true  <- 2     # residual SD
+```
+
+## Simulation Helper (for reference)
+
+```{r}
+#| label: sim-helper-view
+#| echo: true
+simulate_birth_data
+```
+
+## Base Causal Structure: E → Nutrition → Birthweight ← E
+
+- Nutrition (`X`) → Birthweight (`Y`)
+- Another variable `E` affects both 
+- No missingness yet; this is the target data-generating process.
+- Full data model uses Y ~ X + E as our 'truth'.
+
+## Base Relationship: What's in E?
+
+- E stands in for any observed factor that affects both nutrition and birthweight.
+- Examples: education, clinic context, or barriers to care.
+- We're using a simple version to make the mechanics visible.
+
+## Causal Graph
+
+```{r}
+#| label: dag-xy
+#| fig-align: center
+#| fig-width: 14
+#| fig-height: 10
+p_xy
+```
+
+
+## Simulate Data Fit the Truth Model
+
+```{r}
+#| label: demo-fit
+#| echo: true
+
+sim_data <- simulate_birth_data(
+  n         = 5000,
+  beta_x    = beta_x_true,
+  beta_e    = beta_e_true,
+  sd_error  = sd_error_true
+)
+
+full_fit <- lm(Y ~ X + E, data = sim_data)
+```
+
+## Simulated Data Model Results
+
+```{r model-results}
+summary(full_fit)
+```
+
+## Partial Relationship: Residualized X vs Y (conditioning on E)
+
+```{r}
+#| label: demo-partial-plot
+#| fig-width: 10
+#| fig-height: 7
+
+full_partial <- make_partial_df(sim_data, "X")
+
+ggplot(full_partial, aes(x = x_resid, y = y_resid)) +
+  geom_point(alpha = 0.35) +
+  geom_smooth(method = "lm", se = FALSE, color = "steelblue") +
+  labs(
+    x = "Residualized nutrition (X | E)",
+    y = "Residualized birthweight (Y | E)",
+    title = "Partial relationship between nutrition and birthweight"
+  ) +
+  theme_minimal(base_size = 18)
+```
+
+# MCAR: Missing Completely At Random
+
+## MCAR: The Happy Case
+
+- Missingness is truly random.
+- For MCAR, we randomly delete nutrition (`X`) for a subset of mothers.
+- Random missingness has no relationship to education or nutrition values.
+
+## MCAR: Impact
+
+- Missing data does not cause biased estimates. It just reduces precision/power.
+- Example: random equipment failures, accidentally dropped samples.
+
+## MCAR: Dag
+
+```{r}
+#| label: dag-mcar
+#| fig-align: center
+#| fig-width: 14
+#| fig-height: 10
+p_mcar
+```
+
+## Simulation Code: Base Data and MCAR
+
+```{r}
+#| label: sim-setup
+#| echo: true
+
+# Ensure base data exists (5000 rows defined earlier)
+if (!exists("sim_data")) {
+  sim_data <- simulate_birth_data(
+    n         = 5000,
+    beta_x    = beta_x_true,
+    beta_e    = beta_e_true,
+    sd_error  = sd_error_true
+  )
+}
+
+# Full data model (gold standard) on the complete data
+full_fit <- lm(Y ~ X + E, data = sim_data)
+
+# Randomly mark 50% of X as missing (MCAR) for this demo
+mcar_data <- sim_data |>
+  mutate(
+    drop_flag = rbinom(n(), 1, 0.5),
+    X_mcar = if_else(drop_flag == 1, NA_real_, X)
+  )
+```
+
+## MCAR with Listwise Deletion
+
+```{r}
+#| label: mcar-listwise
+#| echo: true
+
+# Only keep rows where X_mcar is observed (listwise deletion)
+mcar_cc <- mcar_data |> filter(!is.na(X_mcar))
+mcar_fit <- lm(Y ~ X_mcar + E, data = mcar_cc)
+
+nrow(mcar_cc)
+summary(mcar_fit)
+```
+
+## Summary of Differemnces
+
+```{r}
+
+mcar_compare <- tibble(
+  method   = c("Full data (truth)", "MCAR listwise"),
+  estimate = c(coef(full_fit)[["X"]], coef(mcar_fit)[["X_mcar"]]),
+  se       = c(
+    coef(summary(full_fit))[["X", "Std. Error"]],
+    coef(summary(mcar_fit))[["X_mcar", "Std. Error"]]
+  )
+)
+
+mcar_fit
+mcar_compare
+```
+
+## Power Analysis: MCAR vs. Complete Data
+
+```{r}
+#| label: mcar-power
+#| fig-cap: "MCAR: estimates center on truth; uncertainty widens as more X is missing."
+#| cache: true
+
+true_beta_x <- coef(full_fit)[["X"]]
+
+levels <- seq(0, 0.9, by = 0.1)
+
+mcar_results <- map_df(levels, function(miss) {
+  sims <- replicate(300, simplify = FALSE, {
+    tmp <- sim_data |>
+      mutate(
+        X_mcar = if_else(rbinom(n(), 1, miss) == 1, NA_real_, X)
+      )
+    mcar_cc <- tmp |> filter(!is.na(X_mcar))
+    fit <- lm(Y ~ X_mcar + E, data = mcar_cc)
+    tibble(
+      estimate = coef(fit)[["X_mcar"]],
+      se = coef(summary(fit))[["X_mcar", "Std. Error"]],
+      n_used = nrow(mcar_cc)
+    )
+  })
+  tibble(
+    missing = miss,
+    estimate = mean(map_dbl(sims, "estimate")),
+    se = mean(map_dbl(sims, "se")),
+    n_used = mean(map_dbl(sims, "n_used"))
+  )
+})
+
+mcar_results <- mcar_results |> drop_na(estimate, se)
+
+ggplot(mcar_results, aes(x = missing, y = estimate)) +
+  geom_hline(yintercept = true_beta_x, linetype = 2, color = "gray50", linewidth = 1) +
+  geom_pointrange(aes(ymin = estimate - se, ymax = estimate + se),
+                  size = 0.3) +
+  geom_text(aes(label = paste0("n=", round(n_used))), y = 0.42, vjust = -0.3, size = 3.5) +
+  labs(
+    y = "Estimated slope (nutrition → birthweight)",
+    x = "Proportion of X missing (MCAR)",
+    subtitle = "MCAR: unbiased slopes, widening uncertainty"
+  ) +
+  theme_minimal(base_size = 14)
+```
+
+## MCAR: Not a Big Deal But Rarely Plausible
+
+- MCAR is the **happy case**: just drop mothers with missing nutrition, move on.
+- You lose precision/power, but no bias.
+- **Problem**: MCAR is seldom plausible, except in a few cases (e.g., random measurement instrument failure)
+
+# MAR: Missing At Random
+
+## MAR: Nonresponse Driven by E and X
+
+- Missingness rises with an observed factor (e.g., education, clinic context) and when nutrition is low.
+- Education affects both nutrition and birthweight.
+- Dropping cases with missing values up-weights higher-education/higher-nutrition mothers, biasing the nutrition effect.
+
+## MAR Scenario Set
+
+We will look at:
+
+- A single “truth” dataset (n = 20,000) with no missingness
+- MAR cases with 10%, 30%, and 60% of X missing
+- For each level: one scenario where missingness is driven by E (observable) and one where missingness is driven by X itself (worst case)
+
+## DAG
+
+```{r}
+#| label: dag-mar
+#| fig-align: center
+#| fig-width: 14
+#| fig-height: 10
+p_mar
+```
+
+
+```{r}
+#| label: mar-data
+#| include: false
+
+# Single truth dataset (large n for stable coefficients)
+set.seed(123)
+full_data <- simulate_birth_data(
+  n         = 20000,
+  beta_x    = beta_x_true,
+  beta_e    = beta_e_true,
+  sd_error  = sd_error_true,
+  mcar_rate = 0,
+  mar_logit_shift = 0
+) |> mutate(X_mar = X, miss_mar = 0)
+
+# Helper to apply MAR missingness to the same base data
+make_mar <- function(dat, missing_rate, shift, depend = c("E", "X")) {
+  depend <- match.arg(depend)
+  mar_var <- if (depend == "E") {
+    1 - dat$E
+  } else {
+    -as.numeric(scale(dat$X)) # lower X -> higher missing
+  }
+  alpha <- uniroot(
+    f = function(a) mean(plogis(a + shift * mar_var)) - missing_rate,
+    interval = c(-15, 15)
+  )$root
+  p_miss <- plogis(alpha + shift * mar_var)
+  miss   <- rbinom(nrow(dat), 1, p_miss)
+  dat |>
+    mutate(
+      X_mar = if_else(miss == 1, NA_real_, X),
+      miss_mar = miss
+    )
+}
+
+scenario_info <- tibble::tibble(
+  missing_rate = rep(c(0.1, 0.3, 0.6), each = 2),
+  mar_depend = rep(c("E", "X"), times = 3),
+  shift = if_else(mar_depend == "E", 3, 6),
+  label = paste0(missing_rate * 100, "% missing, ",
+                 if_else(mar_depend == "E", "E-driven", "X-driven"))
+)
+
+mar_grid <- bind_rows(
+  tibble::tibble(
+    label = "Full data",
+    data = list(full_data)
+  ),
+  scenario_info |>
+    mutate(data = purrr::pmap(list(missing_rate, shift, mar_depend),
+                              ~ make_mar(full_data, ..1, ..2, ..3))) |>
+    select(label, data)
+)
+
+scenario_levels <- mar_grid$label
+
+full_ref <- mar_grid$data[[1]]
+ref_Y <- mean(full_ref$Y); ref_X <- mean(full_ref$X); ref_E <- mean(full_ref$E)
+
+mar_summary <- mar_grid |>
+  mutate(
+    N = map_int(data, ~ sum(!is.na(.x$X_mar))),
+    mean_Y = map_dbl(data, ~ mean(.x$Y, na.rm = TRUE)),
+    sd_Y   = map_dbl(data, ~ sd(.x$Y, na.rm = TRUE)),
+    mean_X = map_dbl(data, ~ mean(.x$X_mar, na.rm = TRUE)),
+    sd_X   = map_dbl(data, ~ sd(.x$X_mar, na.rm = TRUE)),
+    mean_E = map_dbl(data, ~ mean(.x$E, na.rm = TRUE)),
+    sd_E   = map_dbl(data, ~ sd(.x$E, na.rm = TRUE))
+  ) |>
+  mutate(
+    `Y bias` = round(mean_Y - ref_Y, 2),
+    `X bias` = round(mean_X - ref_X, 2),
+    `E bias` = round(mean_E - ref_E, 2),
+    `Y mean` = round(mean_Y, 2),
+    `Y sd`   = round(sd_Y, 2),
+    `X mean` = round(mean_X, 2),
+    `X sd`   = round(sd_X, 2),
+    `E mean` = round(mean_E, 2),
+    `E sd`   = round(sd_E, 2),
+    scenario = factor(label, levels = scenario_levels)
+  ) |>
+  arrange(scenario) |>
+  mutate(scenario = as.character(scenario)) |>
+  select(
+    scenario, N,
+    `Y mean`, `Y sd`, `Y bias`,
+    `X mean`, `X sd`, `X bias`,
+    `E mean`, `E sd`, `E bias`
+  )
+```
+
+## MAR Scenarios, summarized
+
+- No Y/E bias here; we only are missing on X here
+- Bias increases with more missing data
+- Bias increased when relationship between X, E, and p(missing) is higher
+- The highest bias scenario has a particularly strong link between the true value of X and p(`x missing`)
+
+```{r}
+if (requireNamespace("kableExtra", quietly = TRUE)) {
+  mar_summary |>
+    kableExtra::kable(format = "html") |>
+    kableExtra::kable_styling(font_size = 14) |>
+    kableExtra::column_spec(5, bold = TRUE, color = "red") |>  # Y bias
+    kableExtra::column_spec(8, bold = TRUE, color = "red") |>  # X bias
+    kableExtra::column_spec(11, bold = TRUE, color = "red")    # E bias
+} else {
+  knitr::kable(mar_summary, format = "simple")
+}
+```
+
+## MAR Scenarios: Naive Regression (Y ~ X)
+
+- No adjustment for E; drop rows with missing X.
+- True $β_X$ = 0.50
+- E affects both `Y`, `X`, and `p(x missing)`; these models are both MNAR and mis-specified
+- MNAR and mis-specified models tend to go hand-in-hand.
+
+```{r}
+#| label: mar-scenarios-reg-naive
+#| echo: false
+
+order_levels <- scenario_levels
+
+mar_reg_naive <- purrr::map2_dfr(mar_grid$data, mar_grid$label, function(dat, lbl) {
+  scen <- lbl
+  if (scen == "Full data") {
+    dat_use <- dat
+    fit <- lm(Y ~ X, data = dat_use)
+    x_var <- "X"
+  } else {
+    dat_use <- dat |> dplyr::filter(!is.na(X_mar))
+    fit <- lm(Y ~ X_mar, data = dat_use)
+    x_var <- "X_mar"
+  }
+  cf <- coef(summary(fit))
+  tibble(
+    scenario = scen,
+    N = nrow(dat_use),
+    est_X = cf[x_var, "Estimate"],
+    se_X  = cf[x_var, "Std. Error"]
+  )
+}) |>
+  mutate(
+    order = match(scenario, order_levels),
+    est_X = round(est_X, 3),
+    se_X  = round(se_X, 3)
+  ) |>
+  arrange(order) |>
+  select(-order)
+
+if (requireNamespace("kableExtra", quietly = TRUE)) {
+  mar_reg_naive |>
+    kableExtra::kable(format = "html",
+                      col.names = c("Scenario","N","β_X","SE(β_X)")) |>
+    kableExtra::kable_styling(font_size = 14) |>
+    kableExtra::column_spec(3, bold = TRUE, color = "red")
+} else {
+  knitr::kable(mar_reg_naive,
+               col.names = c("Scenario","N","β_X","SE(β_X)"),
+               format = "simple")
+}
+```
+
+## MAR Scenarios: Adjusted Regression (Y ~ X + E)
+
+- This model is correctly specified. "No backdoor paths."
+- Observed scenarios drop cases with missing X.
+- True $β_X$ = 0.50
+- Even without any imputation, the adjusted model recovers $β_X$ reasonably well across scenarios.
+- The main consequence is power loss, not bias.
+
+```{r}
+#| label: mar-scenarios-reg
+#| echo: false
+mar_reg <- purrr::map2_dfr(mar_grid$data, mar_grid$label, function(dat, lbl) {
+  scen <- lbl
+  if (scen == "Full data") {
+    dat_use <- dat
+    fit <- lm(Y ~ X + E, data = dat_use)
+    x_var <- "X"
+    e_var <- "E"
+  } else {
+    dat_use <- dat |> dplyr::filter(!is.na(X_mar))
+    fit <- lm(Y ~ X_mar + E, data = dat_use)
+    x_var <- "X_mar"
+    e_var <- "E"
+  }
+
+  cf <- coef(summary(fit))
+  out <- tibble(
+    scenario = scen,
+    N = nrow(dat_use),
+    est_X = cf[x_var, "Estimate"],
+    se_X  = cf[x_var, "Std. Error"],
+    est_E = cf[e_var, "Estimate"],
+    se_E  = cf[e_var, "Std. Error"]
+  )
+  out
+})
+
+order_levels <- scenario_levels
+mar_reg <- mar_reg |>
+  mutate(
+    order = match(scenario, order_levels),
+    est_X = round(est_X, 3),
+    se_X  = round(se_X, 3),
+    est_E = round(est_E, 3),
+    se_E  = round(se_E, 3)
+  ) |>
+  arrange(order) |>
+  select(-order)
+
+if (requireNamespace("kableExtra", quietly = TRUE)) {
+  mar_reg |>
+    kableExtra::kable(format = "html",
+                      col.names = c("Scenario","N","β_X","SE(β_X)","β_E","SE(β_E)")) |>
+    kableExtra::kable_styling(font_size = 14) |>
+    kableExtra::column_spec(3, bold = TRUE, color = "red") |>
+    kableExtra::column_spec(5, bold = TRUE, color = "red")
+} else {
+  knitr::kable(mar_reg,
+               col.names = c("Scenario","N","β_X","SE(β_X)","β_E","SE(β_E)"),
+               format = "simple")
+}
+```
+
+## When MAR Holds (and When It Doesn't)
+
+- If we model the variables that drive missingness (here, `X` and `E`), listwise deletion analyses stay near the truth.
+- In that case, missing data mostly hurts precision: fewer cases translates to bigger SEs.
+- Trouble begins when key drivers are unmeasured or omitted (e.g., X-driven missingness with only Y ~ X): then MAR is violated relative to the analysis, and bias appears.
+- In real workflows we can combine modeling plus imputation; this performs best.
+
+## Common, Non-Ideal Imputation Tactics
+
+- We apply four historically common tactics to each MAR scenario (E-driven and X-driven at 10/30/60% missing) plus the full, no-missing baseline.
+- Every regression keeps $E$ in the model (since we observe it); what changes is how we reconstruct $X$.
+- Tables on the next slides show $β_X$, standard errors, and how far each method drifts from the true 0.50.
+
+```{r}
+#| label: mar-impute-data
+#| include: false
+
+strategies <- c("Complete-case", "Mean imputation", "Mean + indicator", "Regression impute", "Hot-deck")
+
+apply_strategy <- function(dat, strategy) {
+  if (strategy == "Complete-case") {
+    dat_use <- dat |> filter(!is.na(X_mar))
+    fit <- lm(Y ~ X_mar + E, data = dat_use)
+    est <- coef(summary(fit))["X_mar", ]
+    tibble(
+      N = nrow(dat_use),
+      beta_x = est["Estimate"],
+      se_x = est["Std. Error"],
+      x_mean = mean(dat_use$X_mar, na.rm = TRUE),
+      x_sd = sd(dat_use$X_mar, na.rm = TRUE)
+    )
+  } else if (strategy == "Mean imputation") {
+    mean_x <- mean(dat$X_mar, na.rm = TRUE)
+    dat_use <- dat |> mutate(X_imp = if_else(is.na(X_mar), mean_x, X_mar))
+    fit <- lm(Y ~ X_imp + E, data = dat_use)
+    est <- coef(summary(fit))["X_imp", ]
+    tibble(
+      N = nrow(dat_use),
+      beta_x = est["Estimate"],
+      se_x = est["Std. Error"],
+      x_mean = mean(dat_use$X_imp),
+      x_sd = sd(dat_use$X_imp)
+    )
+  } else if (strategy == "Mean + indicator") {
+    mean_x <- mean(dat$X_mar, na.rm = TRUE)
+    dat_use <- dat |>
+      mutate(
+        miss_ind = as.integer(is.na(X_mar)),
+        X_imp = if_else(is.na(X_mar), mean_x, X_mar)
+      )
+    fit <- lm(Y ~ X_imp + miss_ind + E, data = dat_use)
+    est <- coef(summary(fit))["X_imp", ]
+    tibble(
+      N = nrow(dat_use),
+      beta_x = est["Estimate"],
+      se_x = est["Std. Error"],
+      x_mean = mean(dat_use$X_imp),
+      x_sd = sd(dat_use$X_imp)
+    )
+  } else if (strategy == "Regression impute") {
+    reg_x <- lm(X ~ E, data = dat, subset = !is.na(X_mar))
+    dat_use <- dat |> mutate(
+      X_imp = if_else(is.na(X_mar), predict(reg_x, newdata = dat), X_mar)
+    )
+    fit <- lm(Y ~ X_imp + E, data = dat_use)
+    est <- coef(summary(fit))["X_imp", ]
+    tibble(
+      N = nrow(dat_use),
+      beta_x = est["Estimate"],
+      se_x = est["Std. Error"],
+      x_mean = mean(dat_use$X_imp),
+      x_sd = sd(dat_use$X_imp)
+    )
+  } else {
+    observed <- dat$X_mar[!is.na(dat$X_mar)]
+    hot_draw <- sample(observed, size = sum(is.na(dat$X_mar)), replace = TRUE)
+    dat_use <- dat |>
+      mutate(
+        X_imp = replace(X_mar, is.na(X_mar), hot_draw)
+      )
+    fit <- lm(Y ~ X_imp + E, data = dat_use)
+    est <- coef(summary(fit))["X_imp", ]
+    tibble(
+      N = nrow(dat_use),
+      beta_x = est["Estimate"],
+      se_x = est["Std. Error"],
+      x_mean = mean(dat_use$X_imp),
+      x_sd = sd(dat_use$X_imp)
+    )
+  }
+}
+
+impute_results <- mar_grid |>
+  mutate(results = purrr::map(data, function(dat) {
+    purrr::map_dfr(strategies, ~ apply_strategy(dat, .x) |> mutate(method = .x))
+  })) |>
+  select(label, results) |>
+  tidyr::unnest(results) |>
+  mutate(
+    label = factor(label, levels = scenario_levels),
+    beta_bias = round(beta_x - beta_x_true, 3),
+    beta_x = round(beta_x, 3),
+    se_x = round(se_x, 3),
+    x_mean = round(x_mean, 2),
+    x_sd = round(x_sd, 2)
+  ) |>
+  arrange(label, method)
+
+missing_lookup <- mar_grid |>
+  mutate(missing_prop = purrr::map_dbl(data, ~ mean(is.na(.x$X_mar)))) |>
+  select(label, missing_prop)
+
+listwise_lookup <- impute_results |>
+  filter(method == "Complete-case") |>
+  select(label, N_listwise = N, beta_listwise = beta_x, se_listwise = se_x)
+
+method_table <- function(method_name) {
+  impute_results |>
+    filter(method == method_name) |>
+    arrange(label) |>
+    left_join(missing_lookup, by = c("label" = "label")) |>
+    left_join(listwise_lookup, by = c("label" = "label")) |>
+    mutate(
+      Missing = paste0(round(missing_prop * 100), "%")
+    ) |>
+    select(
+      Scenario = label,
+      Missing,
+      `N listwise` = N_listwise,
+      `β_X listwise` = beta_listwise,
+      `SE listwise` = se_listwise,
+      N,
+      `β_X` = beta_x,
+      `SE(β_X)` = se_x,
+      `β_X bias` = beta_bias,
+      `X mean` = x_mean,
+      `X sd` = x_sd
+    )
+}
+
+render_method_table <- function(method_name, font_size = 13) {
+  tbl <- method_table(method_name)
+  if (requireNamespace("kableExtra", quietly = TRUE)) {
+    kableExtra::kable(tbl, format = "html") |>
+      kableExtra::kable_styling(font_size = font_size) |>
+      kableExtra::column_spec(4, bold = TRUE, color = "red") |>
+      kableExtra::column_spec(7, bold = TRUE, color = "red") |>
+      kableExtra::column_spec(9, bold = TRUE, color = "red")
+  } else {
+    knitr::kable(tbl, format = "simple")
+  }
+}
+
+```{r}
+#| label: mar-impute-helpers-plot
+#| include: false
+
+partial_impute_long <- impute_results |>
+  left_join(listwise_lookup, by = c("label" = "label")) |>
+  mutate(
+    scenario = factor(label, levels = scenario_levels),
+    method_clean = factor(method,
+                          levels = c("Complete-case", "Mean imputation", "Mean + indicator", "Hot-deck", "Regression impute"),
+                          labels = c("Listwise", "Mean", "Mean+Ind", "Hot-deck", "Regress"))
+  ) |>
+  mutate(
+    estimate_method = beta_x,
+    se_method = se_x,
+    estimate_listwise = beta_listwise,
+    se_listwise = se_listwise
+  )
+
+impute_plot_data <- partial_impute_long |>
+  filter(method != "Complete-case") |>
+  mutate(method_clean = forcats::fct_drop(method_clean))
+
+plot_impute_method <- function(method_name) {
+  df <- impute_plot_data |> filter(method == method_name)
+  ggplot(df, aes(x = estimate_method, y = scenario)) +
+    geom_vline(xintercept = beta_x_true, linetype = 2, color = "gray40") +
+    geom_point(aes(x = estimate_listwise), color = "steelblue", size = 2, alpha = 0.8) +
+    geom_point(color = "firebrick", size = 3) +
+    geom_segment(aes(x = estimate_listwise, xend = estimate_method, yend = scenario),
+                 color = "gray70") +
+    coord_cartesian(xlim = c(0, 1)) +
+    labs(
+      x = expression(hat(beta)[X]),
+      y = NULL,
+      subtitle = paste0(method_name, " (red) vs. listwise deletion (blue)"),
+      title = "Truth (vertical dashed)"
+    ) +
+    theme_minimal(base_size = 14)
+}
+
+```
+
+## Mean Imputation
+
+- Insert a single cohort-wide mean for every missing nutrition value.
+- Mechanics: compute the mean of observed $X$, then plug that constant into each missing slot 
+- All imputed mothers receive the same nutrition score, so their points line up on the same vertical slice of the scatter.
+
+## Mean Imputation: Simulation Results
+
+```{r}
+#| label: mar-impute-mean-table
+#| echo: false
+
+render_method_table("Mean imputation", font_size = 14)
+```
+
+## Mean Imputation vs. Listwise Deletion
+
+```{r}
+#| label: mar-impute-mean-plot
+#| echo: false
+
+plot_impute_method("Mean imputation")
+```
+
+## Mean Imputation: Problems
+
+- Even with $E$ in the regression, bias is *worse* with mean imputation than just using listwise deletion.
+- In this case, shrinks the slope toward zero: missing cases on average have worse nutrition; we replace those missing values with the data from cases where highly educated, well-nourished mothers are over-represented.
+- Standard are too small because we flooded our data with identical, non-varying values.
+
+## Mean + Indicator
+
+- Start with mean imputation, then append a binary “missing” indicator to the regression.
+- Mechanics: fill missing $X$ with the cohort mean, create `miss_ind = 1` when $X$ was imputed, and fit $Y \sim X + E + miss\_ind)$.
+- Intuition: mothers with missing nutrition get the same slope as everyone else but a separate intercept shift governed by the indicator.
+
+## Mean + Indicator: Simulation Results
+
+```{r}
+#| label: mar-impute-meanind-table
+#| echo: false
+
+render_method_table("Mean + indicator", font_size = 14)
+```
+
+## Mean + Indicator vs. Listwise Deletion
+
+```{r}
+#| label: mar-impute-meanind-plot
+#| echo: false
+
+plot_impute_method("Mean + indicator")
+```
+
+## Mean + Indicator: Problems
+
+
+- In this case, adding an indicator reduced bias a good deal compared to mean imputation
+- Treats missingness as a fixed effect, so can exacerbate bias on other coefficients (e.g., $\beta_E$) correlated with missingness
+
+## Hot-Deck Imputation: Mechanics
+
+- For each missing nutrition value, randomly draw a donor mother who reported $X$ and copy her score.
+- Mechanics: sample with replacement from observed $X$’s, replace the NA’s, and analyze $Y \sim X + E$ on the filled in dataset.
+
+## Hot-Deck Imputation: Simulation Results
+
+```{r}
+#| label: mar-impute-hotdeck-table
+#| echo: false
+
+render_method_table("Hot-deck", font_size = 14)
+```
+
+## Hot-Deck Imputation vs. Listwise Deletion
+
+```{r}
+#| label: mar-impute-hotdeck-plot
+#| echo: false
+
+plot_impute_method("Hot-deck")
+```
+
+## Hot-Deck Imputation: Problems
+
+- In this case, performs worse than mean imputation, vastly eaxcerbating bias from listwise deletion
+- Works when missingness is MCAR; once it depends on $E$ or $X$, donor pools misrepresent the missing cases.
+- Still leads to overly tight SEs because draws are constrained to known cases. In our case, these known cases are from a tighter distribution than the truth.
+
+## Regression Imputation: Mechanics (Single Driver)
+
+- Estimate a predictive model $\widehat{X} = \widehat{\alpha} + \widehat{\gamma} E$ using only mothers with observed nutrition.
+- $\widehat{\alpha}$ is the fitted intercept (baseline nutrition when $E = 0$); $\widehat{\gamma}$ is the estimated effect of $E$ on nutrition.
+- Mechanics: use the observed $E$ to predict $X$ for every missing case, replace the NA with that prediction, and then run the outcome regression.
+- In our simulation, low-education mothers receive imputations near $\widehat{\alpha}$ while high-education mothers get $\widehat{\alpha} + \widehat{\gamma}$—mirroring the DAG structure instead of collapsing to a single mean.
+
+## Regression Imputation: Mechanics (Multiple Drivers)
+
+- When several observed variables $Z_1, Z_2, \ldots, Z_p$ relate to nutrition or missingness, fit $\widehat{X} = \widehat{\alpha} + \sum_{j=1}^p \widehat{\gamma}_j Z_j$ among mothers who reported $X$.
+- Each coefficient $\widehat{\gamma}_j$ shows how that covariate shifts expected nutrition; the imputed value is the linear predictor for each missing case.
+- In richer data, the $Z_j$ could include clinic context, SES, prior visits, etc.—anything observed that plausibly drives both nutrition and missingness.
+
+## Model-based Imputation Techniques
+
+- With rich data sets, you do not have to limit your missing data model to covariates in your analysis model
+- The idea is to model each variable with the most informative model you have
+- This is similar to propensity score models, where you model the treatment mechanism to produce matched sets or weights to achieve balance
+
+## Regression Imputation: Simulation Results
+
+```{r}
+#| label: mar-impute-reg-table
+#| echo: false
+
+render_method_table("Regression impute", font_size = 14)
+```
+
+## Regression Imputation vs. Listwise Deletion
+
+```{r}
+#| label: mar-impute-reg-plot
+#| echo: false
+
+plot_impute_method("Regression impute")
+```
+
+## Regression Imputation: Problems
+
+- SEs are typically too optimistic: every missing X is deterministically set
+- Multiple imputation could add back the right amount of noise and uncertainty.
+- Remember: the goal is unbiased estimates of both $\beta_X$ and $SE(\beta_X)$
+
+## Deterministic Imputation ≠ More Power
+
+- **Same line, more dots:** Single imputation pins every filled $X$ to the $E$-based guess, so the points stack on one line and add almost no new information about the slope.
+- **Spread, not headcount, drives SEs:** Because the spread of $X$ at each level of $E$ stays tiny, the slope’s standard error barely budges even though more rows show up.
+- **False confidence risk:** Complete cases can look “precise” simply because they ignore how unsure we are about the missing nutrition scores.
+
+## Where Do We Go From Here?
+
+- We need to put believable spread back into the missing rows rather than printing the same predicted value over and over.
+- Multiple imputation helps mitigate this problem
+
+## Multiple Imputation
+
+- Treat the missing nutrition scores as random draws from a model that predicts $X$ using the information we do have (here, $E$).
+- Do that filling process multiple times, fit $Y \sim X + E$ in each completed data set, and then average the estimates using Rubin's rules.
+
+```{r}
+#| label: mar-mi-data
+#| include: false
+
+run_mi <- function(dat, m = 10, seed = 2024) {
+  dat_use <- dat |>
+    mutate(X_obs = X_mar) |>
+    select(Y, E, X_obs)
+
+  if (all(!is.na(dat_use$X_obs))) {
+    fit <- lm(Y ~ X_obs + E, data = dat_use)
+    list(
+      estimate = coef(fit)[["X_obs"]],
+      se = coef(summary(fit))["X_obs", "Std. Error"],
+      m = 0
+    )
+  } else {
+    imp <- mice::mice(dat_use, m = m, method = "pmm", seed = seed, printFlag = FALSE)
+    fit <- with(imp, lm(Y ~ X_obs + E))
+    pooled <- mice::pool(fit)
+    row <- summary(pooled)
+    row <- dplyr::filter(row, term == "X_obs")
+    list(
+      estimate = row$estimate,
+      se = row$std.error,
+      m = m
+    )
+  }
+}
+
+mar_mi_results <- mar_grid |>
+  mutate(mi = purrr::map(data, ~ run_mi(.x, m = 10))) |>
+  mutate(
+    mi_est = purrr::map_dbl(mi, "estimate"),
+    mi_se = purrr::map_dbl(mi, "se")
+  ) |>
+  select(-mi) |>
+  left_join(missing_lookup, by = c("label" = "label")) |>
+  left_join(listwise_lookup, by = c("label" = "label")) |>
+  mutate(
+    scenario = factor(label, levels = scenario_levels),
+    Missing = paste0(round(missing_prop * 100), "%"),
+    mi_bias = mi_est - beta_x_true
+  )
+
+mar_mi_table <- mar_mi_results |>
+  mutate(
+    `N listwise` = N_listwise,
+    `β_X listwise` = round(beta_listwise, 3),
+    `SE listwise` = round(se_listwise, 3),
+    `β_X (MI)` = round(mi_est, 3),
+    `SE (MI)` = round(mi_se, 3),
+    `β_X bias (MI)` = round(mi_bias, 3)
+  ) |>
+  arrange(scenario) |>
+  select(
+    Scenario = label,
+    Missing,
+    `N listwise`,
+    `β_X listwise`,
+    `SE listwise`,
+    `β_X (MI)`,
+    `SE (MI)`,
+    `β_X bias (MI)`
+  )
+
+mi_plot_data <- mar_mi_results |>
+  arrange(scenario) |>
+  mutate(
+    Scenario = factor(label, levels = scenario_levels)
+  )
+```
+
+```{r}
+#| label: mnar-data
+#| include: false
+
+simulate_mnar_data <- function(n = 2000, seed = 2025) {
+  set.seed(seed)
+  class_pos <- rnorm(n)
+  education <- as.numeric(scale(0.6 * class_pos + rnorm(n)))
+  income <- as.numeric(scale(0.8 * class_pos + rnorm(n)))
+  insurance <- as.numeric(scale(0.5 * education + 0.4 * income + rnorm(n)))
+  provider <- as.numeric(scale(0.7 * class_pos + 0.2 * education + rnorm(n)))
+  family <- as.numeric(scale(0.6 * class_pos + 0.2 * education + rnorm(n)))
+  nutrition <- as.numeric(scale(0.4 * education + 0.3 * income + 0.2 * family + rnorm(n)))
+  birthweight <- 3 + 0.5 * nutrition + 0.3 * provider + 0.2 * class_pos + rnorm(n, sd = 2)
+  logit_missing <- -0.3 - 1.1 * income - 0.9 * provider - 0.7 * family - 0.8 * class_pos
+  p_miss <- plogis(logit_missing)
+  miss_flag <- rbinom(n, 1, p_miss)
+  nutrition_obs <- if_else(miss_flag == 1, NA_real_, nutrition)
+  tibble(
+    Y = birthweight,
+    nutrition,
+    nutrition_obs,
+    education,
+    income,
+    insurance,
+    provider,
+    family,
+    class_pos,
+    miss_flag
+  )
+}
+
+mnar_data <- simulate_mnar_data()
+
+mnar_full_fit <- lm(Y ~ nutrition + education + insurance + income + provider + family + class_pos,
+                    data = mnar_data)
+mnar_truth <- coef(mnar_full_fit)["nutrition"]
+
+mnar_obs_full_fit <- lm(Y ~ nutrition + education + insurance, data = mnar_data)
+
+mnar_listwise_data <- mnar_data |>
+  filter(!is.na(nutrition_obs))
+
+mnar_listwise_fit <- lm(Y ~ nutrition_obs + education + insurance,
+                         data = mnar_listwise_data)
+
+run_mi_mnar <- function(dat, m = 10, seed = 2026) {
+  dat_use <- dat |>
+    transmute(Y, education, insurance, X_obs = nutrition_obs)
+  if (all(!is.na(dat_use$X_obs))) {
+    fit <- lm(Y ~ X_obs + education + insurance, data = dat_use)
+    return(list(
+      estimate = coef(fit)[["X_obs"]],
+      se = coef(summary(fit))["X_obs", "Std. Error"],
+      imp = NULL
+    ))
+  }
+  pred <- mice::make.predictorMatrix(dat_use)
+  pred[,] <- 0
+  pred["X_obs", c("education", "insurance", "Y")] <- 1
+  meth <- rep("", ncol(dat_use))
+  names(meth) <- names(dat_use)
+  meth["X_obs"] <- "pmm"
+  imp <- mice::mice(dat_use, m = m, predictorMatrix = pred, method = meth,
+                    seed = seed, printFlag = FALSE)
+  fit <- with(imp, lm(Y ~ X_obs + education + insurance))
+  pooled <- mice::pool(fit)
+  row <- summary(pooled) |> dplyr::filter(term == "X_obs")
+  list(estimate = row$estimate, se = row$std.error, imp = imp)
+}
+
+mnar_mi <- run_mi_mnar(mnar_data)
+
+mnar_table1 <- {
+  mi_stats <- NULL
+  if (!is.null(mnar_mi$imp)) {
+    mi_stats <- purrr::map_dfr(1:mnar_mi$imp$m, function(i) {
+      comp <- mice::complete(mnar_mi$imp, action = i)
+      tibble(
+        nutrition_mean = mean(comp$X_obs),
+        nutrition_sd = sd(comp$X_obs),
+        education_mean = mean(comp$education),
+        insurance_mean = mean(comp$insurance),
+        Y_mean = mean(comp$Y),
+        Y_sd = sd(comp$Y)
+      )
+    }) |>
+      summarise(across(everything(), mean))
+  }
+
+  bind_rows(
+    tibble(
+      sample = "Full data",
+      nutrition_mean = mean(mnar_data$nutrition),
+      nutrition_sd = sd(mnar_data$nutrition),
+      education_mean = mean(mnar_data$education),
+      insurance_mean = mean(mnar_data$insurance),
+      Y_mean = mean(mnar_data$Y),
+      Y_sd = sd(mnar_data$Y)
+    ),
+    tibble(
+      sample = "Listwise",
+      nutrition_mean = mean(mnar_listwise_data$nutrition_obs, na.rm = TRUE),
+      nutrition_sd = sd(mnar_listwise_data$nutrition_obs, na.rm = TRUE),
+      education_mean = mean(mnar_listwise_data$education),
+      insurance_mean = mean(mnar_listwise_data$insurance),
+      Y_mean = mean(mnar_listwise_data$Y),
+      Y_sd = sd(mnar_listwise_data$Y)
+    ),
+    tibble(
+      sample = "MI (avg)",
+      nutrition_mean = mi_stats$nutrition_mean,
+      nutrition_sd = mi_stats$nutrition_sd,
+      education_mean = mi_stats$education_mean,
+      insurance_mean = mi_stats$insurance_mean,
+      Y_mean = mi_stats$Y_mean,
+      Y_sd = mi_stats$Y_sd
+    )
+  ) |>
+    mutate(
+      nutrition_mean = round(nutrition_mean, 2),
+      nutrition_sd = round(nutrition_sd, 2),
+      education_mean = round(education_mean, 2),
+      insurance_mean = round(insurance_mean, 2),
+      Y_mean = round(Y_mean, 2),
+      Y_sd = round(Y_sd, 2)
+    )
+}
+
+mnar_results <- tibble(
+  method = c(
+    "Omniscient (X + hidden drivers)",
+    "Observed, no missing",
+    "Listwise deletion",
+    "Multiple imputation"
+  ),
+  estimate = c(
+    mnar_truth,
+    coef(mnar_obs_full_fit)[["nutrition"]],
+    coef(mnar_listwise_fit)[["nutrition_obs"]],
+    mnar_mi$estimate
+  ),
+  se = c(
+    coef(summary(mnar_full_fit))["nutrition", "Std. Error"],
+    coef(summary(mnar_obs_full_fit))["nutrition", "Std. Error"],
+    coef(summary(mnar_listwise_fit))["nutrition_obs", "Std. Error"],
+    mnar_mi$se
+  )
+) |>
+  mutate(bias = estimate - beta_x_true)
+```
+
+
+## Multiple Imputation: Simulation Results
+
+```{r}
+#| label: mar-mi-table
+#| echo: false
+
+if (requireNamespace("kableExtra", quietly = TRUE)) {
+  mar_mi_table |>
+    kableExtra::kable(format = "html") |>
+    kableExtra::kable_styling(font_size = 13) |>
+    kableExtra::column_spec(4, bold = TRUE, color = "steelblue") |>
+    kableExtra::column_spec(5, color = "steelblue") |>
+    kableExtra::column_spec(6, bold = TRUE, color = "darkgreen") |>
+    kableExtra::column_spec(7, color = "darkgreen") |>
+    kableExtra::column_spec(8, bold = TRUE, color = "darkgreen")
+} else {
+  knitr::kable(mar_mi_table, format = "simple", font_size = 14)
+}
+```
+
+## Multiple Imputation vs. Listwise Deletion
+
+```{r}
+#| label: mar-mi-plot
+#| echo: false
+
+ggplot(mi_plot_data, aes(y = Scenario)) +
+  geom_vline(xintercept = beta_x_true, linetype = 2, color = "gray40") +
+  geom_point(aes(x = beta_listwise), color = "steelblue", size = 2, alpha = 0.9) +
+  geom_point(aes(x = mi_est), color = "darkgreen", size = 3) +
+  geom_segment(aes(x = beta_listwise, xend = mi_est, yend = Scenario), color = "gray70") +
+  coord_cartesian(xlim = c(0, 1)) +
+  labs(
+    x = expression(hat(beta)[X]),
+    y = NULL,
+    subtitle = "Dark green = MI, blue = listwise; dashed = truth"
+  ) +
+  theme_minimal(base_size = 14)
+```
+
+## Why Multiple Imputation Helps
+
+- **Adds plausible wiggle:** MI draws $X^* = f(E) + \varepsilon$, where $f(E)$ is the best guess for nutrition given $E$ and $\varepsilon$ is a random residual sampled from the estimated spread. That restores the variation we would have seen if $X$ were observed.
+- **Honest uncertainty:** Rubin’s imputation combination rules blend the within- and between-imputation variance, so SEs stay truthful even when missingness is heavy.
+- **Bias correction:** Because each draw reflects how $X$ and $E$ relate, the averaged estimate lands near the true $\beta_X$.
+
+## Multiple Imputation: Takeaways
+
+- MI lands on the true $\beta_X$ even in the harsh scenario where values of X drive missingness.
+- The combined SEs stay honest because Rubin's rules keep the run-to-run variation in the mix.
+- Next session we’ll dig into more details on how MI works and how to implement it yourself.
+
+# MNAR: Missing Not At Random
+
+## MNAR & Imputatoin
+
+- Multiple imputation is not a magic bullet
+- If you do not have rich enough covariates to accurately model p(missing X), there is missing data strategy that can save your analysis.
+- Lets finish by examining such a scenario
+
+## MNAR DAG: Hidden Drivers
+
+```{r}
+#| label: dag-mnar-big
+#| echo: false
+
+p_mnar_big
+```
+
+
+## MNAR Stress Test Setup
+
+- Nutrition, income, provider quality, family stability, and class are all correlated.
+- We only observe education and insurance, so any missingness tied to the other pieces is effectively MNAR for us.
+- Lets compare listwise deletion vs. MI when we have a complex causal graph with unobserved data
+
+## MNAR Simulation Details
+
+- Simulated 2,000 mothers with seven covariates; truth: $\beta_X = 0.50$ in $Y \sim X + \text{education} + \text{insurance}$.
+- Missing nutrition is more likely for low income, low provider quality, fragile family, lower class position mothers.
+- Analysts only get $Y$, education, insurance, and nutrition (with missingness).
+
+## MNAR Table 1: Who's in Each Sample?
+
+- We can see here by using MI, our summary statistics look more accurate
+- The MAR illustration showed how listwise deletion recovered accurate model estimates
+- However, an accurate Table 1 of summary statistics also benefits from imputation! 
+
+```{r}
+#| label: mnar-table1
+#| echo: false
+
+if (requireNamespace("kableExtra", quietly = TRUE)) {
+  mnar_table1 |>
+    kableExtra::kable(format = "html",
+                      col.names = c("Sample","Mean X","SD X","Mean educ","Mean insurance","Mean Y","SD Y")) |>
+    kableExtra::kable_styling(font_size = 13)
+} else {
+  knitr::kable(mnar_table1,
+               col.names = c("Sample","Mean X","SD X","Mean educ","Mean insurance","Mean Y","SD Y"),
+               format = "simple", font_size = 14)
+}
+```
+
+## MNAR Model Specs
+
+- **Truth (omniscient):** $Y \sim X$  $ + \text{education} + \text{insurance} +$ $\text{income} + \text{provider} + $ $\text{family} + \text{class}$.
+- **What we can actually fit:** $Y \sim X + \text{education} + \text{insurance}$ on whatever $X$ values we have.
+- We compare three versions of that observed model: full data (for reference), listwise deletion, and MI.
+
+## MNAR Results: Listwise vs. MI
+
+- Omniscient model (with hidden drivers) nails $\beta_X$, as expected.
+- Even with full nutrition but no hidden drivers, we drift because the omitted variables matter.
+- Once nutrition goes missing, both listwise and MI lean on education/insurance; MI can actually look worse than listwise deletion!
+
+
+```{r}
+#| label: mnar-results-table
+#| echo: false
+
+mnar_results_table <- mnar_results |>
+  mutate(
+    estimate = round(estimate, 3),
+    se = round(se, 3),
+    bias = round(bias, 3)
+  )
+
+if (requireNamespace("kableExtra", quietly = TRUE)) {
+  mnar_results_table |>
+    kableExtra::kable(format = "html",
+                      col.names = c("Method","β_X","SE","Bias")) |>
+    kableExtra::kable_styling(font_size = 13) |>
+    kableExtra::column_spec(2, bold = TRUE) |>
+    kableExtra::column_spec(4, color = "red")
+} else {
+  knitr::kable(mnar_results_table,
+               col.names = c("Method","β_X","SE","Bias"),
+               format = "simple",
+               font_size = 14)
+}
+```
+
+## MNAR: No Easy Fix
+
+- Both listwise deletion and MI miss the truth because neither sees the hidden drivers of missingness.
+- MI can even overshoot when missingness leans on factors we never measure—its imputed $X$ just mirrors education/insurance again.
+- Only extra information (new variables, external data, or sensitivity analyses) can break out of this corner.
+ 
+# Conclusion
+
+## Takeaways
+
+- Handling missing data well is all about good causal inference, on both Y and your missing Xs
+- No missing data strategy can fix an impoverished data set
+- You need to spend a good deal of time thinking about your causal graphs/DAGs before you implement imputation strategies
+- Don't be afraid of simulating your specific data; you can't observe your missing Xs, but you can simulate scenarios that tell you what would happen to your results under various conditions.
+
+
+## Thank You!
+
+- Erik Westlund
+- Johns Hopkins Biostatistics Center
+- ewestlund@jhu.edu

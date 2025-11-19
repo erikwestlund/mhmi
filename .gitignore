@@ -1,0 +1,42 @@
+# Framework Presentation Project
+# Pattern-based gitignore - works regardless of directory structure customization
+
+# R environment
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+
+# renv (package management)
+/renv/
+/renv.lock
+
+*_files*
+
+# Private directories (anywhere in project tree)
+**/private/**
+**/*_private/**
+
+# Utility directories (anywhere in project tree)
+**/cache/**
+**/scratch/**
+
+# Python (if using reticulate)
+__pycache__/
+.ipynb_checkpoints/
+
+# IDE - personal settings only (commit workspace settings)
+.vscode/.history/
+.positron/.history/
+
+# macOS
+.DS_Store
+
+# Secrets and environment files
+.env
+.env.local
+.Renviron
+
+# Temporary files
+*.tmp
+*.log

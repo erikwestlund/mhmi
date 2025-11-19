@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(quarto render:*)",
+      "WebFetch(domain:jhbiostatcenter.github.io)",
+      "Bash(Rscript:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
