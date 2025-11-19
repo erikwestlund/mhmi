@@ -11,6 +11,7 @@
 /renv/
 /renv.lock
 
+.claude
 *_files*
 *_cache*
 
