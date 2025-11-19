@@ -3,7 +3,8 @@
     "allow": [
       "Bash(quarto render:*)",
       "WebFetch(domain:jhbiostatcenter.github.io)",
-      "Bash(Rscript:*)"
+      "Bash(Rscript:*)",
+      "WebFetch(domain:github.com)"
     ],
     "deny": [],
     "ask": []
