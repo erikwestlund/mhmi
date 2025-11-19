@@ -7,6 +7,7 @@ This repository contains materials from a presentation on missing data concepts,
 
 The project includes:
 - **presentation.qmd**: Main Quarto presentation file
+- **docs/**: GitHub Pages deployment directory (contains rendered presentation)
 - **functions/**: Helper R functions auto-sourced by framework
 - **settings.yml**: Project configuration and package management
 
@@ -33,6 +34,20 @@ quarto render presentation.qmd
 ```
 
 The output is a self-contained HTML file using Revealjs for slide transitions.
+
+## GitHub Pages
+The presentation is automatically deployed to GitHub Pages. When you commit changes to `presentation.qmd`, a pre-commit hook will:
+1. Render the presentation
+2. Copy the output to `docs/index.html`
+3. Stage the updated file for commit
+
+To enable GitHub Pages:
+1. Go to repository Settings → Pages
+2. Set Source to "Deploy from a branch"
+3. Select branch "main" and folder "/docs"
+4. Save
+
+The presentation will be available at: `https://erikwestlund.github.io/maternal-health-missing-data-1/`
 
 ## Author
 Erik Westlund
