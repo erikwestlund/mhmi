@@ -1318,7 +1318,7 @@ if (requireNamespace("kableExtra", quietly = TRUE)) {
 
 ## MNAR Model Specs
 
-- **Truth (omniscient):** $Y \sim X$  $ + \text{education} + \text{insurance} +$ $\text{income} + \text{provider} + $ $\text{family} + \text{class}$.
+- **Truth (omniscient):** Y ~ X + education + insurance + income + provider + family + class.
 - **What we can actually fit:** $Y \sim X + \text{education} + \text{insurance}$ on whatever $X$ values we have.
 - We compare three versions of that observed model: full data (for reference), listwise deletion, and MI.
 
