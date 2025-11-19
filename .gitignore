@@ -12,6 +12,7 @@
 /renv.lock
 
 *_files*
+*_cache*
 
 # Private directories (anywhere in project tree)
 **/private/**
