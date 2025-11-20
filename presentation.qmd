@@ -27,11 +27,20 @@ theme_set(theme_minimal(base_size = 16))
 set.seed(123)
 ```
 
+## Slides Available Online
+
+- This presentation code be view on GitHub at [https://github.com/erikwestlund/mhmi](https://github.com/erikwestlund/mhmi)
+- The presentation itself can be viewed at [https://erikwestlund.github.io/mhmi](https://erikwestlund.github.io/mhmi)
+
 ## Why Missing Data Matters
 
 - Maternal health studies often rely on observational cohorts, so incomplete data is common.
 - Ignoring missingness can erase power, bias estimates, or make truth unknowable.
 - Today: simulation-first walkthrough with simple DAGs and linear models.
+
+## Before We Start: Questions?
+
+- I have material prepared, but if anyone has particular areas of concern, I can try to address them in my commentary where relevant.
 
 ## Simulated Data: Seeing Is Believing
 
@@ -48,11 +57,7 @@ set.seed(123)
 
 - The DAGs and simulations today are deliberately simple.
 - Real maternal-health data has more variables, feedback loops, and measurement issues.
-
-## Stylized Teaching Examples (cont.)
-
-- Treat these as "toy" examples to see how missingness mechanisms and fixes behave.
-- Next session: revisit with a more realistic, higher-dimensional DAG.
+- Don't let the teaching examples make you jump past important causal structure assumptions underpinning the discussed methods
 
 ## No Exit & Three Other Plays: Mechanisms
 
@@ -132,6 +137,23 @@ dag_mar <- dagify(
   )
 )
 
+# Outcome-dependent missingness (Y drives the recording of X)
+dag_mar_y <- dagify(
+  X ~ E,
+  Y ~ X + E,
+  X_miss ~ Y,
+  coords = list(
+    x = c(E = 0, X = 1.5, Y = 3, X_miss = 3.2),
+    y = c(E = 1, X = 0,   Y = 0, X_miss = 1.7)
+  ),
+  labels = c(
+    "E"      = "observed factor\n(e.g., education)",
+    "X"      = "nutrition",
+    "Y"      = "birthweight",
+    "X_miss" = "nutrition\nmissing"
+  )
+)
+
 dag_mnar_big <- dagify(
   nutrition ~ education + income + family + class,
   birthweight ~ nutrition + provider + class,
@@ -163,6 +185,7 @@ dag_mnar_big <- dagify(
 p_xy   <- ggdag(dag_xy,   text = TRUE, use_labels = "label") + theme_dag()
 p_mcar <- ggdag(dag_mcar, text = TRUE, use_labels = "label") + theme_dag()
 p_mar  <- ggdag(dag_mar,  text = TRUE, use_labels = "label") + theme_dag()
+p_mar_y <- ggdag(dag_mar_y, text = TRUE, use_labels = "label") + theme_dag()
 p_mnar_big <- ggdag(dag_mnar_big, text = TRUE, use_labels = "label") + theme_dag()
 ```
 
@@ -193,10 +216,9 @@ simulate_birth_data
 
 ## Base Causal Structure: E → Nutrition → Birthweight ← E
 
-- Nutrition (`X`) → Birthweight (`Y`)
+- Nutrition `X` → Birthweight `Y`
 - Another variable `E` affects both nutrition and birthweight
-- No missingness yet; this is the target data-generating process.
-- Full data model uses Y ~ X + E as our 'truth'.
+- No missingness yet; this is the baseline, "omniscient" data-generating process.
 
 ## Base Relationship: What's in E?
 
@@ -262,7 +284,7 @@ ggplot(full_partial, aes(x = x_resid, y = y_resid)) +
 ## MCAR: The Happy Case
 
 - Missingness is truly random.
-- For MCAR, we randomly delete nutrition (`X`) for a subset of mothers.
+- For MCAR, we randomly delete nutrition `X` for a subset of mothers.
 - Random missingness has no relationship to education or nutrition values.
 
 ## MCAR: Impact
@@ -885,7 +907,7 @@ plot_impute_method("Mean imputation")
 ## Mean + Indicator
 
 - Start with mean imputation, then append a binary “missing” indicator to the regression.
-- Mechanics: fill missing $X$ with the cohort mean, create `miss_ind = 1` when $X$ was imputed, and fit $Y \sim X + E + miss\_ind`.
+- Mechanics: fill missing $X$ with the cohort mean, create `miss_ind = 1` when $X$ was imputed, and fit $Y \sim X + E + miss\_ind$.
 - Intuition: mothers with missing nutrition get the same slope as everyone else but a separate intercept shift governed by the indicator.
 
 ## Mean + Indicator: Simulation Results
@@ -941,24 +963,17 @@ plot_impute_method("Hot-deck")
 - Works when missingness is MCAR; once it depends on $E$, donor pools misrepresent the missing cases.
 - Still leads to overly tight SEs because draws are constrained to known cases. In our case, these known cases are from a tighter distribution than the truth.
 
-## Regression Imputation: Mechanics (Single Driver)
+## Regression Imputation: Mechanics
 
 - Estimate a predictive model $\widehat{X} = \widehat{\alpha} + \widehat{\gamma} E$ using only mothers with observed nutrition.
 - $\widehat{\alpha}$ is the fitted intercept (baseline nutrition when $E = 0$); $\widehat{\gamma}$ is the estimated effect of $E$ on nutrition.
 - Mechanics: use the observed $E$ to predict $X$ for every missing case, replace the missing Xs with that prediction, and then run the outcome regression.
 - In our simulation, low-education mothers receive imputations near $\widehat{\alpha}$ while high-education mothers get $\widehat{\alpha} + \widehat{\gamma}$—mirroring the DAG structure instead of collapsing to a single mean.
 
-## Regression Imputation: Mechanics (Multiple Drivers)
+## Regression Imputation: Mechanics (Multiple Missingness Causes)
 
 - When several observed variables $Z_1, Z_2, \ldots, Z_p$ relate to nutrition or missingness, fit $\widehat{X} = \widehat{\alpha} + \sum_{j=1}^p \widehat{\gamma}_j Z_j$ among mothers who reported $X$.
 - Each coefficient $\widehat{\gamma}_j$ shows how that covariate shifts expected nutrition; the imputed value is the linear predictor for each missing case.
-- In richer data, the $Z_j$ could include clinic context, SES, prior visits, etc.—anything observed that plausibly drives both nutrition and missingness.
-
-## Model-based Imputation Techniques
-
-- With rich data sets, you do not have to limit your missing data model to covariates in your analysis model
-- The idea is to model each variable with the most informative model you have
-- This is similar to propensity score models, where you model the treatment mechanism to produce matched sets or weights to achieve balance
 
 ## Regression Imputation: Simulation Results
 
@@ -987,15 +1002,79 @@ plot_impute_method("Regression impute")
 ## Deterministic Imputation ≠ Power
 
 - **Same line, more dots:** Regression imputation deterministically replaces each missing $X$ with its predicted value from $E$. Those rows reinforce the complete-case relationship instead of adding new leverage.
-- **Spread, not headcount, drives SEs:** The standard error of a slope depends on the spread of the predictor, not the raw row count. Because all imputed $X$ are identical for each value of E, they add almost no variance, so the denominator of $\mathrm{SE}(\hat\beta_X)$ barely changes. Worse, single-value imputation pretends those fills are certain, so standard errors can be *too* small.
 - **False confidence:**  You can see how SEs mirror the omniscient model, but they should in fact be larger than the omniscient model.
+
+# Multiple Imputation
+
+```{r}
+#| label: mar-y-driven-data
+#| include: false
+
+set.seed(2026)
+mar_y_data <- simulate_birth_data(
+  n         = 6000,
+  beta_x    = beta_x_true,
+  beta_e    = beta_e_true,
+  sd_error  = sd_error_true,
+  mcar_rate = 0,
+  mar_logit_shift = 0
+) |>
+  mutate(
+    y_std = as.numeric(scale(Y)),
+    p_miss_y = plogis(-0.3 - 1.1 * y_std),
+    miss_y = rbinom(n(), 1, p_miss_y),
+    X_marY = if_else(miss_y == 1, NA_real_, X)
+  )
+
+mar_y_full_fit <- lm(Y ~ X + E, data = mar_y_data)
+mar_y_list_data <- mar_y_data |> filter(!is.na(X_marY))
+mar_y_list_fit <- lm(Y ~ X_marY + E, data = mar_y_list_data)
+
+mar_y_imp <- mar_y_data |>
+  transmute(Y, E, X_obs = X_marY)
+
+pred_y <- mice::make.predictorMatrix(mar_y_imp)
+pred_y[,] <- 0
+pred_y["X_obs", c("Y", "E")] <- 1
+
+mar_y_mi <- mice::mice(
+  mar_y_imp,
+  m = 15,
+  method = "pmm",
+  predictorMatrix = pred_y,
+  seed = 2027,
+  printFlag = FALSE
+)
+
+mar_y_mi_fit <- with(mar_y_mi, lm(Y ~ X_obs + E))
+mar_y_mi_pool <- mice::pool(mar_y_mi_fit)
+mar_y_mi_row <- summary(mar_y_mi_pool) |> dplyr::filter(term == "X_obs")
+
+mar_y_compare <- tibble(
+  Method = c("Full data (truth)", "Listwise deletion", "Multiple imputation"),
+  beta_x = c(
+    coef(mar_y_full_fit)[["X"]],
+    coef(mar_y_list_fit)[["X_marY"]],
+    mar_y_mi_row$estimate
+  ),
+  se = c(
+    coef(summary(mar_y_full_fit))["X", "Std. Error"],
+    coef(summary(mar_y_list_fit))["X_marY", "Std. Error"],
+    mar_y_mi_row$std.error
+  ),
+  bias = beta_x - beta_x_true
+)
+
+mar_y_missing_rate <- mean(mar_y_data$miss_y)
+mar_y_n_list <- nrow(mar_y_list_data)
+```
 
 ## Where Do We Go From Here?
 
 - We need to put believable spread back into the missing rows rather than printing the same predicted value over and over.
 - Multiple imputation helps mitigate this problem
 
-## Multiple Imputation
+## Multiple Imputation: Mechanics
 
 - Treat the missing nutrition scores as random draws from a model that predicts $X$ using the information we do have (here, $E$).
 - Do that filling process multiple times, fit $Y \sim X + E$ in each completed data set, and then average the estimates using Rubin's rules.
@@ -1413,6 +1492,77 @@ ggplot(mi_plot_data, aes(y = Scenario)) +
 - **Honest uncertainty:** Rubin's imputation combination rules blend the within- and between-imputation variance, so SEs stay truthful even when missingness is heavy.
 - **Bias correction:** Because each draw reflects how $X$ and $E$ relate, the averaged estimate lands near the true $\beta_X$.
 
+
+# MAR, MI, &amp; Outcome Variables
+
+## Common Mistake: Not Imputing Outcomes
+
+- When missingness depends on `Y`, analysts often hesitate to use `Y` to impute `X` 
+- But if you leave `Y` out you replicate the listwise bias because the imputations can't see the selection mechanism. 
+
+## “Isn’t $Y$ Later in Time?”
+
+- Yes. Nutrition is recorded before birthweight, but by the time we analyze the data, $Y$ is observed for every mother.
+- Imputation models the joint distribution of $(X, Y, E)$ using all observed information; it doesn’t send signals back in time.
+- Leaving $Y$ out because of timing hides the mechanism that made $X$ go missing and recreates the listwise bias.
+- The causal analysis still honors temporal order: first repair the dataset using all available information, then fit $Y \sim X + E$ on the completed data.
+
+## Outcome-Dependent Missingness: New Scenario
+
+- In this new scenario, nutrition still causes birthweight, but now **recording nutrition depends on the outcome itself**: emergency low-birthweight deliveries lose the time needed to capture $X$.
+- Missingness is MAR because it relies on observed $Y$ and $E$, yet complete-case regression **drops precisely the low-$Y$ mothers** and tilts $\hat\beta_X$.
+- Multiple imputation repairs the bias by letting $Y$ (and $E$) predict the missing $X$ values before fitting the usual $Y \sim X + E$ model.
+
+
+## DAG: $Y$ Drives Whether $X$ Is Observed
+
+```{r}
+#| label: dag-mar-y
+#| fig-align: center
+#| fig-width: 14
+#| fig-height: 10
+p_mar_y
+```
+
+## Simulation Summary
+
+- $n = 6{,}000$ mothers; true $\beta_X = 0.50$
+- About `r scales::percent(mar_y_missing_rate, accuracy = 0)` of nutrition scores are missing when birthweight is low
+- Listwise deletion keeps only `r mar_y_n_list` observations and overstates the nutrition slope
+
+## Listwise vs. MI
+
+```{r}
+#| label: mar-y-compare-table
+#| echo: false
+
+mar_y_display <- mar_y_compare |>
+  mutate(
+    beta_x = round(beta_x, 3),
+    se = round(se, 3),
+    bias = round(bias, 3)
+  )
+
+if (requireNamespace("kableExtra", quietly = TRUE)) {
+  mar_y_display |>
+    kableExtra::kable(format = "html",
+                      col.names = c("Method", "$\\hat{\\beta}_X$", "SE", "Bias")) |>
+    kableExtra::kable_styling(font_size = 13) |>
+    kableExtra::column_spec(2, bold = TRUE) |>
+    kableExtra::column_spec(4, color = "red")
+} else {
+  knitr::kable(mar_y_display,
+               col.names = c("Method", "$\\hat{\\beta}_X$", "SE", "Bias"),
+               format = "simple")
+}
+```
+
+- **Listwise deletion:** drops low-$Y$ deliveries, depressing the slope of `X`
+- **Multiple imputation:** models $X$ with predictors $(Y,E)$, fills 15 completed datasets with predictive mean matching, and Rubin’s rules recover the true slope and honest SEs.
+- The outcome still depends on the same covariates ($X$ and $E$); MI just leverages *outcome information* during imputation instead of discarding it via listwise deletion.
+
+# MI: Summary
+
 ## Multiple Imputation: Takeaways
 
 - MI lands on the true $\beta_X$ even when missingness depends on E, provided we include the variables (here, $E$) that explain that missingness.
@@ -1500,7 +1650,7 @@ if (requireNamespace("kableExtra", quietly = TRUE)) {
 ## MNAR-lite: Listwise vs. MI
 
 - MI lines up with listwise deletion because both models respect the same ignorability structure
-- Rubin's rules still help by keeping uncertainty honest; we recover truth without pretending the imputed rows are certain
+- Rubin's rules still help by keeping 
 
 ```{r}
 #| label: mar-x-mi-table
