@@ -10,12 +10,13 @@ format:
     slide-number: true
     incremental: true
     self-contained: true
+    css: styles.css
+    include-after-body: title-logos.html
 execute:
   echo: false
   warning: false
   message: false
 ---
-
 ```{r}
 #| label: setup
 #| include: false
@@ -69,7 +70,7 @@ set.seed(123)
 
 ## Today's Plan
 
-- Work through examples of MCAR and MAR to get an intution for their implications
+- Work through examples of MCAR and MAR to get an intuition for their implications
 - Examine common "fixes" to show how they fail and motivate why we need multiple imputation 
 
 
@@ -252,7 +253,7 @@ ggplot(full_partial, aes(x = x_resid, y = y_resid)) +
   theme_minimal(base_size = 18)
 ```
 
-# MCAR: Missing Completely At Random
+# MCAR: Missing Completely At Random {data-background-color="#002D72"}
 
 ## MCAR: The Happy Case
 
@@ -316,7 +317,7 @@ nrow(mcar_cc)
 summary(mcar_fit)
 ```
 
-## Summary of Differemnces
+## Summary of Differences
 
 ```{r}
 
@@ -387,7 +388,7 @@ ggplot(mcar_results, aes(x = missing, y = estimate)) +
 - You lose precision/power, but no bias.
 - **Problem**: MCAR is seldom plausible, except in a few cases (e.g., random measurement instrument failure)
 
-# MAR: Missing At Random
+# MAR: Missing At Random {data-background-color="#002D72"}
 
 ## MAR: Nonresponse Driven by E and X
 
@@ -871,7 +872,7 @@ plot_impute_method("Mean imputation")
 ## Mean + Indicator
 
 - Start with mean imputation, then append a binary “missing” indicator to the regression.
-- Mechanics: fill missing $X$ with the cohort mean, create `miss_ind = 1` when $X$ was imputed, and fit $Y \sim X + E + miss\_ind)$.
+- Mechanics: fill missing $X$ with the cohort mean, create `miss_ind = 1` when $X$ was imputed, and fit $Y \sim X + E + miss\_ind`.
 - Intuition: mothers with missing nutrition get the same slope as everyone else but a separate intercept shift governed by the indicator.
 
 ## Mean + Indicator: Simulation Results
@@ -923,7 +924,7 @@ plot_impute_method("Hot-deck")
 
 ## Hot-Deck Imputation: Problems
 
-- In this case, performs worse than mean imputation, vastly eaxcerbating bias from listwise deletion
+- In this case, performs worse than mean imputation, vastly exacerbating bias from listwise deletion
 - Works when missingness is MCAR; once it depends on $E$ or $X$, donor pools misrepresent the missing cases.
 - Still leads to overly tight SEs because draws are constrained to known cases. In our case, these known cases are from a tighter distribution than the truth.
 
@@ -1264,12 +1265,12 @@ ggplot(mi_plot_data, aes(y = Scenario)) +
 - The combined SEs stay honest because Rubin's rules keep the run-to-run variation in the mix.
 - Next session we’ll dig into more details on how MI works and how to implement it yourself.
 
-# MNAR: Missing Not At Random
+# MNAR: Missing Not At Random {data-background-color="#002D72"}
 
-## MNAR & Imputatoin
+## MNAR & Imputation
 
 - Multiple imputation is not a magic bullet
-- If you do not have rich enough covariates to accurately model p(missing X), there is missing data strategy that can save your analysis.
+- If you do not have rich enough covariates to accurately model p(missing X), there is no missing data strategy that can save your analysis.
 - Lets finish by examining such a scenario
 
 ## MNAR DAG: Hidden Drivers
@@ -1361,7 +1362,7 @@ if (requireNamespace("kableExtra", quietly = TRUE)) {
 - MI can even overshoot when missingness leans on factors we never measure—its imputed $X$ just mirrors education/insurance again.
 - Only extra information (new variables, external data, or sensitivity analyses) can break out of this corner.
  
-# Conclusion
+# Conclusion {data-background-color="#002D72"}
 
 ## Takeaways
 

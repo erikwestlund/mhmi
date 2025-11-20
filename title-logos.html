@@ -1,0 +1,32 @@
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  var titleSlide = document.getElementById('title-slide');
+  if (titleSlide) {
+    // Create header div with logos at the bottom
+    var headerDiv = document.createElement('div');
+    headerDiv.style.cssText = 'position: fixed; bottom: 50px; left: 0; right: 0; display: flex; justify-content: space-between; align-items: center; padding: 0 60px; z-index: 1000; pointer-events: none;';
+    headerDiv.innerHTML = `
+      <img src="images/mh-logo.png" style="height: 70px; width: auto;">
+      <span style="color: #F47B20; font-size: 0.75em; font-weight: 600;"></span>
+      <img src="images/jhu-logo.png" style="height: 70px; width: auto;">
+    `;
+
+    // Only show on title slide
+    headerDiv.className = 'title-slide-logos';
+
+    // Append to body to avoid layout issues
+    document.body.appendChild(headerDiv);
+
+    // Hide logos when navigating away from title slide
+    Reveal.on('slidechanged', function(event) {
+      if (event.currentSlide.id === 'title-slide') {
+        headerDiv.style.display = 'flex';
+      } else {
+        headerDiv.style.display = 'none';
+      }
+    });
+
+    // No need to adjust title block positioning since logos are at bottom
+  }
+});
+</script>

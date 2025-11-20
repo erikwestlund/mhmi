@@ -1,0 +1,190 @@
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&display=swap');
+
+:root {
+  --jhu-blue: #002D72;
+  --jhu-heritage-blue: #68ACE5;
+  --mh-blue: #0F4C81;
+  --mh-section-blue: #002D72;
+  --mh-orange: #F47B20;
+}
+
+.reveal {
+  font-family: 'Montserrat', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 32px;
+}
+
+.reveal .slide-background {
+  background-color: white;
+}
+
+/* Regular headings on content slides */
+.reveal h1 {
+  color: var(--jhu-blue);
+  font-weight: 600;
+  font-family: 'Montserrat', sans-serif;
+  font-size: 2em;
+}
+
+.reveal h2 {
+  color: var(--jhu-blue);
+  font-weight: 600;
+  font-family: 'Montserrat', sans-serif;
+  font-size: 1.5em;
+  position: relative;
+  padding-left: 80px;
+  padding-top: 4px;
+  padding-bottom: 15px;
+  border-bottom: 3px solid var(--mh-orange);
+  margin-bottom: 30px;
+  margin-top: 0;
+  text-align: left;
+}
+
+.reveal h2::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 60px;
+  height: 60px;
+  background-image: url('images/mh-logo-sq.png');
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+.reveal h3 {
+  color: var(--jhu-blue);
+  font-weight: 600;
+  font-family: 'Montserrat', sans-serif;
+  font-size: 1.2em;
+}
+
+.reveal p, .reveal li {
+  font-size: 0.9em;
+  line-height: 1.4;
+}
+
+.reveal .title-slide h1 {
+  color: var(--jhu-blue);
+  margin-bottom: 0.3em;
+  font-size: 2em;
+}
+
+.reveal .title-slide h2 {
+  color: var(--mh-blue);
+  font-size: 1em;
+  font-weight: 400;
+  padding-left: 0;
+  border-bottom: none;
+  margin-bottom: 0;
+}
+
+.reveal .title-slide h2::before {
+  display: none;
+}
+
+.reveal .title-slide .author {
+  color: var(--mh-orange);
+  font-size: 0.75em;
+  margin-top: 1.5em;
+}
+
+.reveal .title-slide .date {
+  color: var(--mh-orange);
+  font-size: 0.65em;
+  font-weight: 600;
+}
+
+.reveal a {
+  color: var(--jhu-heritage-blue);
+}
+
+.reveal a:hover {
+  color: var(--jhu-blue);
+}
+
+.reveal .title-slide {
+  text-align: center;
+  background-color: #D4E6F1 !important;
+}
+
+.reveal section.title-slide {
+  background-color: #D4E6F1 !important;
+}
+
+.reveal .slide-number {
+  color: var(--jhu-blue);
+  background-color: rgba(255, 255, 255, 0.9);
+}
+
+.reveal strong {
+  color: var(--jhu-blue);
+}
+
+.reveal code {
+  color: var(--mh-blue);
+}
+
+.reveal .slides section .fragment.highlight-red {
+  color: #D9534F;
+}
+
+.reveal table {
+  font-size: 0.8em;
+}
+
+.reveal table th {
+  background-color: var(--jhu-blue);
+  color: white;
+}
+
+.reveal table tr:nth-child(even) {
+  background-color: #f8f9fa;
+}
+
+/* Section divider slides with H1 - blue background with orange line */
+.reveal .slide-background + .slide-content h1.title {
+  background-color: var(--mh-section-blue);
+}
+
+section.has-dark-background h1,
+section.has-dark-background h2,
+section.has-dark-background h3 {
+  color: #B8B8B8;
+}
+
+section.has-dark-background h2 {
+  padding-left: 0;
+  border-bottom: none;
+}
+
+section.has-dark-background h2::before {
+  display: none;
+}
+
+/* Style for slides that only contain an H1 (section dividers) */
+.reveal section > h1:first-child:last-child {
+  color: #B8B8B8;
+  font-weight: 700;
+  font-size: 2.2em;
+  text-align: left;
+  padding-left: 100px;
+  padding-right: 100px;
+  margin-top: 250px;
+  position: relative;
+}
+
+.reveal section > h1:first-child:last-child::after {
+  content: '';
+  display: block;
+  margin-top: 30px;
+  height: 5px;
+  background-color: var(--mh-orange);
+  width: 100%;
+}
+
+/* Blue background for section divider slides */
+.reveal .backgrounds .slide-background:has(+ .slides section > h1:first-child:last-child) {
+  background-color: var(--mh-section-blue) !important;
+}
