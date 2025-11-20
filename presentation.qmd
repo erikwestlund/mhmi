@@ -56,17 +56,21 @@ set.seed(123)
 
 ## No Exit & Three Other Plays: Mechanisms
 
-::: columns
-::: column
+<div class="columns">
+<div class="column" style="width:55%;">
+
 - **Everything is Perfect**: Complete case analysis
 - **Ignorable and Annoying**: Missing Completely at Random (MCAR)
 - **Dangerous but Manageable**: Missing at Random (MAR)
 - **No Exit**: Missing Not at Random (MNAR)
-:::
-::: column
+
+</div>
+<div class="column" style="width:45%; text-align:right;">
+
 ![](images/noexit.jpg){width=60% fig-align="right"}
-:::
-:::
+
+</div>
+</div>
 
 ## Today's Plan
 
@@ -111,11 +115,11 @@ dag_mcar <- dagify(
   )
 )
 
-# MAR: an observed factor and high nutrition drive missingness
+# MAR: missingness driven only by an observed factor
 dag_mar <- dagify(
   X ~ E,
   Y ~ X + E,
-  X_miss ~ E + X,
+  X_miss ~ E,
   coords = list(
     x = c(E = 0, X = 1.5, Y = 3, X_miss = 1.5),
     y = c(E = 1, X = 0,   Y = 0, X_miss = 2.0)
@@ -190,7 +194,7 @@ simulate_birth_data
 ## Base Causal Structure: E → Nutrition → Birthweight ← E
 
 - Nutrition (`X`) → Birthweight (`Y`)
-- Another variable `E` affects both 
+- Another variable `E` affects both nutrition and birthweight
 - No missingness yet; this is the target data-generating process.
 - Full data model uses Y ~ X + E as our 'truth'.
 
@@ -390,11 +394,11 @@ ggplot(mcar_results, aes(x = missing, y = estimate)) +
 
 # MAR: Missing At Random {data-background-color="#002D72"}
 
-## MAR: Nonresponse Driven by E and X
+## MAR: Nonresponse Driven by E
 
-- Missingness rises with an observed factor (e.g., education, clinic context) and when nutrition is low.
+- Missingness rises with an observed factor (e.g., education, clinic context)
 - Education affects both nutrition and birthweight.
-- Dropping cases with missing values up-weights higher-education/higher-nutrition mothers, biasing the nutrition effect.
+- Dropping cases with missing values up-weights higher-education (for example) mothers, biasing the nutrition effect.
 
 ## MAR Scenario Set
 
@@ -402,9 +406,11 @@ We will look at:
 
 - A single “truth” dataset (n = 20,000) with no missingness
 - MAR cases with 10%, 30%, and 60% of X missing
-- For each level: one scenario where missingness is driven by E (observable) and one where missingness is driven by X itself (worst case)
+- Missingness depends on E (observed)
+- All summaries and diagnostics in this MAR section restrict to those E-driven scenarios
+- Next section: reuse the same data but let missingness depend on X to show why that mechanism becomes MNAR
 
-## DAG
+## MAR DAG
 
 ```{r}
 #| label: dag-mar
@@ -470,12 +476,19 @@ mar_grid <- bind_rows(
     select(label, data)
 )
 
-scenario_levels <- mar_grid$label
+mar_grid_mar <- mar_grid |>
+  dplyr::filter(label == "Full data" | grepl("E-driven", label))
 
-full_ref <- mar_grid$data[[1]]
+mar_grid_x <- mar_grid |>
+  dplyr::filter(label == "Full data" | grepl("X-driven", label))
+
+scenario_levels_mar <- mar_grid_mar$label
+scenario_levels_x <- mar_grid_x$label
+
+full_ref <- mar_grid_mar$data[[1]]
 ref_Y <- mean(full_ref$Y); ref_X <- mean(full_ref$X); ref_E <- mean(full_ref$E)
 
-mar_summary <- mar_grid |>
+mar_summary <- mar_grid_mar |>
   mutate(
     N = map_int(data, ~ sum(!is.na(.x$X_mar))),
     mean_Y = map_dbl(data, ~ mean(.x$Y, na.rm = TRUE)),
@@ -495,7 +508,7 @@ mar_summary <- mar_grid |>
     `X sd`   = round(sd_X, 2),
     `E mean` = round(mean_E, 2),
     `E sd`   = round(sd_E, 2),
-    scenario = factor(label, levels = scenario_levels)
+    scenario = factor(label, levels = scenario_levels_mar)
   ) |>
   arrange(scenario) |>
   mutate(scenario = as.character(scenario)) |>
@@ -511,7 +524,7 @@ mar_summary <- mar_grid |>
 
 - No Y/E bias here; we only are missing on X here
 - Bias increases with more missing data
-- Bias increased when relationship between X, E, and p(missing) is higher
+- Bias increased when relationship between E and p(missing) is stronger
 - The highest bias scenario has a particularly strong link between the true value of X and p(`x missing`)
 
 ```{r}
@@ -531,16 +544,16 @@ if (requireNamespace("kableExtra", quietly = TRUE)) {
 
 - No adjustment for E; drop rows with missing X.
 - True $β_X$ = 0.50
-- E affects both `Y`, `X`, and `p(x missing)`; these models are both MNAR and mis-specified
-- MNAR and mis-specified models tend to go hand-in-hand.
+- E affects both `Y`, `X`, and `p(x missing)`; these models are mis-specified without `E`
+- MNAR and mis-specified models tend to go hand-in-hand -- you are missing key variables in your overall causal structure
 
 ```{r}
 #| label: mar-scenarios-reg-naive
 #| echo: false
 
-order_levels <- scenario_levels
+order_levels <- scenario_levels_mar
 
-mar_reg_naive <- purrr::map2_dfr(mar_grid$data, mar_grid$label, function(dat, lbl) {
+mar_reg_naive <- purrr::map2_dfr(mar_grid_mar$data, mar_grid_mar$label, function(dat, lbl) {
   scen <- lbl
   if (scen == "Full data") {
     dat_use <- dat
@@ -585,13 +598,13 @@ if (requireNamespace("kableExtra", quietly = TRUE)) {
 - This model is correctly specified. "No backdoor paths."
 - Observed scenarios drop cases with missing X.
 - True $β_X$ = 0.50
-- Even without any imputation, the adjusted model recovers $β_X$ reasonably well across scenarios.
+- Even without any imputation, the adjusted model recovers $β_X$ across scenarios.
 - The main consequence is power loss, not bias.
 
 ```{r}
 #| label: mar-scenarios-reg
 #| echo: false
-mar_reg <- purrr::map2_dfr(mar_grid$data, mar_grid$label, function(dat, lbl) {
+mar_reg <- purrr::map2_dfr(mar_grid_mar$data, mar_grid_mar$label, function(dat, lbl) {
   scen <- lbl
   if (scen == "Full data") {
     dat_use <- dat
@@ -617,7 +630,7 @@ mar_reg <- purrr::map2_dfr(mar_grid$data, mar_grid$label, function(dat, lbl) {
   out
 })
 
-order_levels <- scenario_levels
+order_levels <- scenario_levels_mar
 mar_reg <- mar_reg |>
   mutate(
     order = match(scenario, order_levels),
@@ -645,14 +658,14 @@ if (requireNamespace("kableExtra", quietly = TRUE)) {
 
 ## When MAR Holds (and When It Doesn't)
 
-- If we model the variables that drive missingness (here, `X` and `E`), listwise deletion analyses stay near the truth.
+- If we model the variables that drive missingness (here, `E`), listwise deletion analyses stay near the truth.
 - In that case, missing data mostly hurts precision: fewer cases translates to bigger SEs.
-- Trouble begins when key drivers are unmeasured or omitted (e.g., X-driven missingness with only Y ~ X): then MAR is violated relative to the analysis, and bias appears.
+- Trouble begins when missingness of a variable depends on its own value: then MAR is violated relative to the analysis, and bias appears.
 - In real workflows we can combine modeling plus imputation; this performs best.
 
 ## Common, Non-Ideal Imputation Tactics
 
-- We apply four historically common tactics to each MAR scenario (E-driven and X-driven at 10/30/60% missing) plus the full, no-missing baseline.
+- We apply four historically common tactics to each MAR scenario (E-driven at 10/30/60% missing) plus the full, no-missing baseline.
 - Every regression keeps $E$ in the model (since we observe it); what changes is how we reconstruct $X$.
 - Tables on the next slides show $β_X$, standard errors, and how far each method drifts from the true 0.50.
 
@@ -735,14 +748,14 @@ apply_strategy <- function(dat, strategy) {
   }
 }
 
-impute_results <- mar_grid |>
+impute_results <- mar_grid_mar |>
   mutate(results = purrr::map(data, function(dat) {
     purrr::map_dfr(strategies, ~ apply_strategy(dat, .x) |> mutate(method = .x))
   })) |>
   select(label, results) |>
   tidyr::unnest(results) |>
   mutate(
-    label = factor(label, levels = scenario_levels),
+    label = factor(label, levels = scenario_levels_mar),
     beta_bias = round(beta_x - beta_x_true, 3),
     beta_x = round(beta_x, 3),
     se_x = round(se_x, 3),
@@ -751,7 +764,7 @@ impute_results <- mar_grid |>
   ) |>
   arrange(label, method)
 
-missing_lookup <- mar_grid |>
+missing_lookup <- mar_grid_mar |>
   mutate(missing_prop = purrr::map_dbl(data, ~ mean(is.na(.x$X_mar)))) |>
   select(label, missing_prop)
 
@@ -803,7 +816,7 @@ render_method_table <- function(method_name, font_size = 13) {
 partial_impute_long <- impute_results |>
   left_join(listwise_lookup, by = c("label" = "label")) |>
   mutate(
-    scenario = factor(label, levels = scenario_levels),
+    scenario = factor(label, levels = scenario_levels_mar),
     method_clean = factor(method,
                           levels = c("Complete-case", "Mean imputation", "Mean + indicator", "Hot-deck", "Regression impute"),
                           labels = c("Listwise", "Mean", "Mean+Ind", "Hot-deck", "Regress"))
@@ -896,13 +909,13 @@ plot_impute_method("Mean + indicator")
 ## Mean + Indicator: Problems
 
 
-- In this case, adding an indicator reduced bias a good deal compared to mean imputation
+- In this case, adding an indicator reduced bias somewhat compared to mean imputation, especially when missingness was lower, but bias remains
 - Treats missingness as a fixed effect, so can exacerbate bias on other coefficients (e.g., $\beta_E$) correlated with missingness
 
 ## Hot-Deck Imputation: Mechanics
 
 - For each missing nutrition value, randomly draw a donor mother who reported $X$ and copy her score.
-- Mechanics: sample with replacement from observed $X$’s, replace the NA’s, and analyze $Y \sim X + E$ on the filled in dataset.
+- Mechanics: sample with replacement from observed $X$'s, replace the missing Xs with thoes values, and analyze $Y \sim X + E$ on the filled in dataset.
 
 ## Hot-Deck Imputation: Simulation Results
 
@@ -925,14 +938,14 @@ plot_impute_method("Hot-deck")
 ## Hot-Deck Imputation: Problems
 
 - In this case, performs worse than mean imputation, vastly exacerbating bias from listwise deletion
-- Works when missingness is MCAR; once it depends on $E$ or $X$, donor pools misrepresent the missing cases.
+- Works when missingness is MCAR; once it depends on $E$, donor pools misrepresent the missing cases.
 - Still leads to overly tight SEs because draws are constrained to known cases. In our case, these known cases are from a tighter distribution than the truth.
 
 ## Regression Imputation: Mechanics (Single Driver)
 
 - Estimate a predictive model $\widehat{X} = \widehat{\alpha} + \widehat{\gamma} E$ using only mothers with observed nutrition.
 - $\widehat{\alpha}$ is the fitted intercept (baseline nutrition when $E = 0$); $\widehat{\gamma}$ is the estimated effect of $E$ on nutrition.
-- Mechanics: use the observed $E$ to predict $X$ for every missing case, replace the NA with that prediction, and then run the outcome regression.
+- Mechanics: use the observed $E$ to predict $X$ for every missing case, replace the missing Xs with that prediction, and then run the outcome regression.
 - In our simulation, low-education mothers receive imputations near $\widehat{\alpha}$ while high-education mothers get $\widehat{\alpha} + \widehat{\gamma}$—mirroring the DAG structure instead of collapsing to a single mean.
 
 ## Regression Imputation: Mechanics (Multiple Drivers)
@@ -973,9 +986,9 @@ plot_impute_method("Regression impute")
 
 ## Deterministic Imputation ≠ Power
 
-- **Same line, more dots (Enders):** Regression imputation replaces each missing $X$ with its predicted value from $E$, so the imputed points fall exactly on the fitted line. With correlation between the imputed $X$ and $E$ essentially one, those rows reinforce the complete-case relationship instead of adding new leverage.
-- **Spread, not headcount, drives SEs:** The standard error of a slope depends on the spread of the predictor, not the raw row count. Because all imputed $X$’s sit on that line, they add almost no variance, so the denominator of $\mathrm{SE}(\hat\beta_X)$ barely changes. Worse, single-value imputation pretends those fills are certain, so standard errors can be *too* small (Gelman & Hill).
-- **Where false confidence lives:** The problem isn’t complete-case analysis—it’s single imputation that ignores the extra uncertainty. Complete cases lose power but report honest SEs; deterministically imputed cases keep $N$ high but understate uncertainty and still inherit bias when missingness isn’t MCAR.
+- **Same line, more dots:** Regression imputation deterministically replaces each missing $X$ with its predicted value from $E$. Those rows reinforce the complete-case relationship instead of adding new leverage.
+- **Spread, not headcount, drives SEs:** The standard error of a slope depends on the spread of the predictor, not the raw row count. Because all imputed $X$ are identical for each value of E, they add almost no variance, so the denominator of $\mathrm{SE}(\hat\beta_X)$ barely changes. Worse, single-value imputation pretends those fills are certain, so standard errors can be *too* small.
+- **False confidence:**  You can see how SEs mirror the omniscient model, but they should in fact be larger than the omniscient model.
 
 ## Where Do We Go From Here?
 
@@ -1017,7 +1030,7 @@ run_mi <- function(dat, m = 10, seed = 2024) {
   }
 }
 
-mar_mi_results <- mar_grid |>
+mar_mi_results <- mar_grid_mar |>
   mutate(mi = purrr::map(data, ~ run_mi(.x, m = 10))) |>
   mutate(
     mi_est = purrr::map_dbl(mi, "estimate"),
@@ -1027,7 +1040,7 @@ mar_mi_results <- mar_grid |>
   left_join(missing_lookup, by = c("label" = "label")) |>
   left_join(listwise_lookup, by = c("label" = "label")) |>
   mutate(
-    scenario = factor(label, levels = scenario_levels),
+    scenario = factor(label, levels = scenario_levels_mar),
     Missing = paste0(round(missing_prop * 100), "%"),
     mi_bias = mi_est - beta_x_true
   )
@@ -1056,8 +1069,149 @@ mar_mi_table <- mar_mi_results |>
 mi_plot_data <- mar_mi_results |>
   arrange(scenario) |>
   mutate(
-    Scenario = factor(label, levels = scenario_levels)
+    Scenario = factor(label, levels = scenario_levels_mar)
   )
+```
+
+```{r}
+#| label: mar-x-objects
+#| include: false
+
+mar_summary_x <- mar_grid_x |>
+  mutate(
+    N = map_int(data, ~ sum(!is.na(.x$X_mar))),
+    mean_Y = map_dbl(data, ~ mean(.x$Y, na.rm = TRUE)),
+    sd_Y   = map_dbl(data, ~ sd(.x$Y, na.rm = TRUE)),
+    mean_X = map_dbl(data, ~ mean(.x$X_mar, na.rm = TRUE)),
+    sd_X   = map_dbl(data, ~ sd(.x$X_mar, na.rm = TRUE)),
+    mean_E = map_dbl(data, ~ mean(.x$E, na.rm = TRUE)),
+    sd_E   = map_dbl(data, ~ sd(.x$E, na.rm = TRUE))
+  ) |>
+  mutate(
+    `Y bias` = round(mean_Y - ref_Y, 2),
+    `X bias` = round(mean_X - ref_X, 2),
+    `E bias` = round(mean_E - ref_E, 2),
+    `Y mean` = round(mean_Y, 2),
+    `Y sd`   = round(sd_Y, 2),
+    `X mean` = round(mean_X, 2),
+    `X sd`   = round(sd_X, 2),
+    `E mean` = round(mean_E, 2),
+    `E sd`   = round(sd_E, 2),
+    scenario = factor(label, levels = scenario_levels_x)
+  ) |>
+  arrange(scenario) |>
+  mutate(scenario = as.character(scenario)) |>
+  select(
+    scenario, N,
+    `Y mean`, `Y sd`, `Y bias`,
+    `X mean`, `X sd`, `X bias`,
+    `E mean`, `E sd`, `E bias`
+  )
+
+mar_reg_naive_x <- purrr::map2_dfr(mar_grid_x$data, mar_grid_x$label, function(dat, lbl) {
+  scen <- lbl
+  if (scen == "Full data") {
+    dat_use <- dat
+    fit <- lm(Y ~ X, data = dat_use)
+    x_var <- "X"
+  } else {
+    dat_use <- dat |> dplyr::filter(!is.na(X_mar))
+    fit <- lm(Y ~ X_mar, data = dat_use)
+    x_var <- "X_mar"
+  }
+  cf <- coef(summary(fit))
+  tibble(
+    scenario = scen,
+    N = nrow(dat_use),
+    est_X = cf[x_var, "Estimate"],
+    se_X  = cf[x_var, "Std. Error"]
+  )
+}) |>
+  mutate(
+    order = match(scenario, scenario_levels_x),
+    est_X = round(est_X, 3),
+    se_X  = round(se_X, 3)
+  ) |>
+  arrange(order) |>
+  select(-order)
+
+mar_reg_x <- purrr::map2_dfr(mar_grid_x$data, mar_grid_x$label, function(dat, lbl) {
+  scen <- lbl
+  if (scen == "Full data") {
+    dat_use <- dat
+    fit <- lm(Y ~ X + E, data = dat_use)
+    x_var <- "X"
+    e_var <- "E"
+  } else {
+    dat_use <- dat |> dplyr::filter(!is.na(X_mar))
+    fit <- lm(Y ~ X_mar + E, data = dat_use)
+    x_var <- "X_mar"
+    e_var <- "E"
+  }
+
+  cf <- coef(summary(fit))
+  tibble(
+    scenario = scen,
+    N = nrow(dat_use),
+    est_X = cf[x_var, "Estimate"],
+    se_X  = cf[x_var, "Std. Error"],
+    est_E = cf[e_var, "Estimate"],
+    se_E  = cf[e_var, "Std. Error"]
+  )
+}) |>
+  mutate(
+    order = match(scenario, scenario_levels_x),
+    est_X = round(est_X, 3),
+    se_X  = round(se_X, 3),
+    est_E = round(est_E, 3),
+    se_E  = round(se_E, 3)
+  ) |>
+  arrange(order) |>
+  select(-order)
+
+missing_lookup_x <- mar_grid_x |>
+  mutate(missing_prop = purrr::map_dbl(data, ~ mean(is.na(.x$X_mar)))) |>
+  select(label, missing_prop)
+
+listwise_lookup_x <- mar_reg_x |>
+  transmute(label = scenario, N_listwise = N, beta_listwise = est_X, se_listwise = se_X)
+
+mar_mi_results_x <- mar_grid_x |>
+  mutate(mi = purrr::map(data, ~ run_mi(.x, m = 10))) |>
+  mutate(
+    mi_est = purrr::map_dbl(mi, "estimate"),
+    mi_se = purrr::map_dbl(mi, "se")
+  ) |>
+  select(-mi) |>
+  left_join(missing_lookup_x, by = c("label" = "label")) |>
+  left_join(listwise_lookup_x, by = c("label" = "label")) |>
+  mutate(
+    scenario = factor(label, levels = scenario_levels_x),
+    Missing = paste0(round(missing_prop * 100), "%"),
+    mi_bias = mi_est - beta_x_true
+  )
+
+mar_mi_table_x <- mar_mi_results_x |>
+  mutate(
+    `N listwise` = N_listwise,
+    `β_X listwise` = round(beta_listwise, 3),
+    `SE listwise` = round(se_listwise, 3),
+    `β_X (MI)` = round(mi_est, 3),
+    `SE (MI)` = round(mi_se, 3),
+    `β_X bias (MI)` = round(mi_bias, 3)
+  ) |>
+  arrange(scenario) |>
+  select(
+    Scenario = label,
+    Missing,
+    `N listwise`,
+    `β_X listwise`,
+    `SE listwise`,
+    `β_X (MI)`,
+    `SE (MI)`,
+    `β_X bias (MI)`
+  )
+
 ```
 
 ```{r}
@@ -1256,14 +1410,112 @@ ggplot(mi_plot_data, aes(y = Scenario)) +
 ## Why Multiple Imputation Helps
 
 - **Adds plausible wiggle:** MI draws $X^* = f(E) + \varepsilon$, where $f(E)$ is the best guess for nutrition given $E$ and $\varepsilon$ is a random residual sampled from the estimated spread. That restores the variation we would have seen if $X$ were observed.
-- **Honest uncertainty:** Rubin’s imputation combination rules blend the within- and between-imputation variance, so SEs stay truthful even when missingness is heavy.
+- **Honest uncertainty:** Rubin's imputation combination rules blend the within- and between-imputation variance, so SEs stay truthful even when missingness is heavy.
 - **Bias correction:** Because each draw reflects how $X$ and $E$ relate, the averaged estimate lands near the true $\beta_X$.
 
 ## Multiple Imputation: Takeaways
 
-- MI lands on the true $\beta_X$ even in the harsh scenario where values of X drive missingness.
+- MI lands on the true $\beta_X$ even when missingness depends on E, provided we include the variables (here, $E$) that explain that missingness.
 - The combined SEs stay honest because Rubin's rules keep the run-to-run variation in the mix.
-- Next session we’ll dig into more details on how MI works and how to implement it yourself.
+- Next session we'll dig into more details on how MI works and how to implement it yourself.
+
+# MNAR-lite: Missingness Responds to X {data-background-color="#002D72"}
+
+## MNAR-lite Setup
+
+- Same 20,000-mother dataset as before
+- Missingness now rises when nutrition is *low* even after we condition on E; missingness depends on X.
+- Analysts observe $Y$, $E$, and an $X$ that is sometimes missing. Because the chance of missingness rises when the *true* $X$ is low, the mechanism is technically MNAR.
+
+## Why OLS Survives This Scenario
+
+- The missingness in the DAG depends only on the regressors ($X$ and $E$), not on any unmodeled part of $Y$.
+- That means the complete cases still satisfy the correct outcome relationship: $E[Y \mid X, E] = \beta_X X + \beta_E E$.
+- Translation: even with MNAR missingness on $X$, listwise deletion remains unbiased **as long as** the outcome model includes the variables driving the missingness. You lose precision, not correctness.
+
+## MNAR-lite: Selection Snapshot
+
+- Education means stay similar, but the observed nutrition mean inflates as missingness rises
+- These differences confirm the selection is MNAR relative to nutrition, even though our regression can still recover the truth with the right control set
+
+```{r}
+#| label: mar-x-summary-table
+#| echo: false
+
+if (requireNamespace("kableExtra", quietly = TRUE)) {
+  mar_summary_x |>
+    kableExtra::kable(format = "html") |>
+    kableExtra::kable_styling(font_size = 14) |>
+    kableExtra::column_spec(6, bold = TRUE, color = "red")
+} else {
+  knitr::kable(mar_summary_x, format = "simple")
+}
+```
+
+## MNAR-lite: Naive Regression (Y ~ X)
+
+- Dropping rows with missing $X$ and ignoring $E$ yields the expected MNAR bias
+- Higher missingness exaggerates the up-weighting of well-nourished mothers, so slopes drift up
+
+```{r}
+#| label: mar-x-reg-naive-table
+#| echo: false
+
+if (requireNamespace("kableExtra", quietly = TRUE)) {
+  mar_reg_naive_x |>
+    kableExtra::kable(format = "html",
+                      col.names = c("Scenario","N","β_X","SE(β_X)")) |>
+    kableExtra::kable_styling(font_size = 14) |>
+    kableExtra::column_spec(3, bold = TRUE, color = "red")
+} else {
+  knitr::kable(mar_reg_naive_x,
+               col.names = c("Scenario","N","β_X","SE(β_X)"),
+               format = "simple")
+}
+```
+
+## MNAR-lite: Adjusted Regression (Y ~ X + E)
+
+- Conditioning on $E$ blocks the backdoor path, so even listwise deletion stays near the true $\beta_X = 0.50$
+- The only cost is power loss; SEs grow as missingness increases
+
+```{r}
+#| label: mar-x-reg-table
+#| echo: false
+
+if (requireNamespace("kableExtra", quietly = TRUE)) {
+  mar_reg_x |>
+    kableExtra::kable(format = "html",
+                      col.names = c("Scenario","N","β_X","SE(β_X)","β_E","SE(β_E)")) |>
+    kableExtra::kable_styling(font_size = 14) |>
+    kableExtra::column_spec(3, bold = TRUE, color = "steelblue") |>
+    kableExtra::column_spec(5, color = "steelblue")
+} else {
+  knitr::kable(mar_reg_x,
+               col.names = c("Scenario","N","β_X","SE(β_X)","β_E","SE(β_E)"),
+               format = "simple")
+}
+```
+
+## MNAR-lite: Listwise vs. MI
+
+- MI lines up with listwise deletion because both models respect the same ignorability structure
+- Rubin's rules still help by keeping uncertainty honest; we recover truth without pretending the imputed rows are certain
+
+```{r}
+#| label: mar-x-mi-table
+#| echo: false
+
+if (requireNamespace("kableExtra", quietly = TRUE)) {
+  mar_mi_table_x |>
+    kableExtra::kable(format = "html") |>
+    kableExtra::kable_styling(font_size = 13) |>
+    kableExtra::column_spec(4, color = "steelblue") |>
+    kableExtra::column_spec(6, bold = TRUE, color = "darkgreen")
+} else {
+  knitr::kable(mar_mi_table_x, format = "simple")
+}
+```
 
 # MNAR: Missing Not At Random {data-background-color="#002D72"}
 
@@ -1271,7 +1523,7 @@ ggplot(mi_plot_data, aes(y = Scenario)) +
 
 - Multiple imputation is not a magic bullet
 - If you do not have rich enough covariates to accurately model p(missing X), there is no missing data strategy that can save your analysis.
-- Lets finish by examining such a scenario
+- Let's finish by examining such a scenario
 
 ## MNAR DAG: Hidden Drivers
 
@@ -1287,7 +1539,7 @@ p_mnar_big
 
 - Nutrition, income, provider quality, family stability, and class are all correlated.
 - We only observe education and insurance, so any missingness tied to the other pieces is effectively MNAR for us.
-- Lets compare listwise deletion vs. MI when we have a complex causal graph with unobserved data
+- Let's compare listwise deletion vs. MI when we have a complex causal graph with unobserved data
 
 ## MNAR Simulation Details
 
@@ -1297,9 +1549,9 @@ p_mnar_big
 
 ## MNAR Table 1: Who's in Each Sample?
 
-- We can see here by using MI, our summary statistics look more accurate
-- The MAR illustration showed how listwise deletion recovered accurate model estimates
-- However, an accurate Table 1 of summary statistics also benefits from imputation! 
+- The MNAR-lite illustration showed how listwise deletion recovered accurate model estimates, but our Table 1 is still wrong
+- We can see here by using MI, our summary statistics are more accurate than listwise deletion, but still biased.
+
 
 ```{r}
 #| label: mnar-table1

@@ -4,7 +4,7 @@
   --jhu-blue: #002D72;
   --jhu-heritage-blue: #68ACE5;
   --mh-blue: #0F4C81;
-  --mh-section-blue: #002D72;
+  --mh-section-blue: #012D72;
   --mh-orange: #F47B20;
 }
 
@@ -151,7 +151,7 @@
 section.has-dark-background h1,
 section.has-dark-background h2,
 section.has-dark-background h3 {
-  color: #B8B8B8;
+  color: #FFFFFF;
 }
 
 section.has-dark-background h2 {
@@ -161,6 +161,11 @@ section.has-dark-background h2 {
 
 section.has-dark-background h2::before {
   display: none;
+}
+
+.reveal section.has-dark-background,
+.reveal .backgrounds .slide-background.has-dark-background {
+  background-color: var(--mh-section-blue) !important;
 }
 
 /* Style for slides that only contain an H1 (section dividers) */
@@ -173,6 +178,10 @@ section.has-dark-background h2::before {
   padding-right: 100px;
   margin-top: 250px;
   position: relative;
+}
+
+.reveal section.has-dark-background > h1:first-child:last-child {
+  color: #FFFFFF;
 }
 
 .reveal section > h1:first-child:last-child::after {
