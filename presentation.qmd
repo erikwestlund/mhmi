@@ -210,7 +210,7 @@ p_xy
 ```
 
 
-## Simulate Data Fit the Truth Model
+## Simulate Data &amp; Fit the "Truth Model"
 
 ```{r}
 #| label: demo-fit
@@ -866,7 +866,7 @@ plot_impute_method("Mean imputation")
 
 - Even with $E$ in the regression, bias is *worse* with mean imputation than just using listwise deletion.
 - In this case, shrinks the slope toward zero: missing cases on average have worse nutrition; we replace those missing values with the data from cases where highly educated, well-nourished mothers are over-represented.
-- Standard are too small because we flooded our data with identical, non-varying values.
+- Standard errors are too small because we flooded our data with identical, non-varying values.
 
 ## Mean + Indicator
 
@@ -970,11 +970,11 @@ plot_impute_method("Regression impute")
 - Multiple imputation could add back the right amount of noise and uncertainty.
 - Remember: the goal is unbiased estimates of both $\beta_X$ and $SE(\beta_X)$
 
-## Deterministic Imputation ≠ More Power
+## Deterministic Imputation ≠ Power
 
-- **Same line, more dots:** Single imputation pins every filled $X$ to the $E$-based guess, so the points stack on one line and add almost no new information about the slope.
-- **Spread, not headcount, drives SEs:** Because the spread of $X$ at each level of $E$ stays tiny, the slope’s standard error barely budges even though more rows show up.
-- **False confidence risk:** Complete cases can look “precise” simply because they ignore how unsure we are about the missing nutrition scores.
+- **Same line, more dots (Enders):** Regression imputation replaces each missing $X$ with its predicted value from $E$, so the imputed points fall exactly on the fitted line. With correlation between the imputed $X$ and $E$ essentially one, those rows reinforce the complete-case relationship instead of adding new leverage.
+- **Spread, not headcount, drives SEs:** The standard error of a slope depends on the spread of the predictor, not the raw row count. Because all imputed $X$’s sit on that line, they add almost no variance, so the denominator of $\mathrm{SE}(\hat\beta_X)$ barely changes. Worse, single-value imputation pretends those fills are certain, so standard errors can be *too* small (Gelman & Hill).
+- **Where false confidence lives:** The problem isn’t complete-case analysis—it’s single imputation that ignores the extra uncertainty. Complete cases lose power but report honest SEs; deterministically imputed cases keep $N$ high but understate uncertainty and still inherit bias when missingness isn’t MCAR.
 
 ## Where Do We Go From Here?
 
